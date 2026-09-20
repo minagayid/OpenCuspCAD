@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#f4f6f7">
+  <title>OpenCusp Dental CAD</title>
+</head>
+<body>
+<div id="app">
+  <aside class="rail"><div class="brand-mark">OC</div><button class="rail-button active">⌂</button><button class="rail-button">▱</button><button class="rail-button">⚙</button><div class="rail-bottom">LOCAL</div></aside>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-name">opencusp</div><div class="brand-caption">DENTAL DESIGN WORKSPACE</div></div>
+      <div class="case-title-block"><div class="eyebrow">CASE / LOCAL DATA</div><div class="case-title" id="case-title">Loading demo case…</div></div>
+      <div class="top-actions"><span class="privacy-pill"><i></i> LOCAL ONLY</span><button class="button button-quiet" id="save-case">Save case</button><button class="button button-primary" id="export-button" disabled>Export review STL</button></div>
+    </header>
+    <nav class="workflow"><div class="workflow-step complete"><span>01</span>Case</div><div class="workflow-line"></div><div class="workflow-step complete"><span>02</span>Scan setup</div><div class="workflow-line"></div><div class="workflow-step active"><span>03</span>Restoration</div><div class="workflow-line"></div><div class="workflow-step"><span>04</span>Review</div><div class="workflow-line"></div><div class="workflow-step"><span>05</span>Manufacturing</div></nav>
+    <section class="workspace">
+      <aside class="left-panel">
+        <div class="case-switch"><select id="case-picker" aria-label="Open saved case"><option value="">Loading cases…</option></select><button class="button button-quiet" id="new-case" type="button">New</button></div>
+        <div class="panel-head"><div><div class="eyebrow">CASE FILES</div><h2>Scan layers</h2></div><button class="icon-button" id="import-button" title="Import STL or PLY">＋</button><input id="file-input" type="file" accept=".stl,.ply" multiple hidden></div>
+        <div id="mesh-list" class="mesh-list"></div><div class="panel-divider"></div>
+        <div class="eyebrow panel-label">RESTORATION</div><div class="restoration-card"><div class="tooth-badge" id="restoration-tooth-badge">3</div><div><strong id="restoration-tooth-label">Training tooth #3</strong><small id="restoration-sub-label">Single crown preview</small></div><span class="status-dot"></span></div>
+        <button class="add-restoration" id="add-restoration">＋ Add design unit</button><div class="panel-divider"></div>
+        <div class="data-card"><div class="eyebrow">INPUT CHECK</div><div class="data-row"><span>Arch scan</span><b class="warn" id="status-arch">Missing</b></div><div class="data-row"><span>Preparation</span><b class="warn" id="status-prep">Missing</b></div><div class="data-row"><span>Antagonist</span><b class="warn" id="status-opposing">Missing</b></div><div class="data-row"><span>Occlusion registration</span><b class="warn" id="bite-check-status">Unverified</b></div></div>
+        <div class="left-footnote">Training geometry stays on this computer.</div>
+      </aside>
+
+      <section class="view-column">
+        <div class="viewer-toolbar"><div class="view-tabs"><button class="view-tab active" data-view="3d">3D view</button><button class="view-tab" data-view="fit">Antagonist distance</button><button class="view-tab" data-view="intaglio">Intaglio</button></div><div class="viewer-actions"><button class="toolbar-button" id="focus-button">⊙ <span>Focus</span></button><button class="toolbar-button" id="isolate-button">◉ <span>Isolate</span></button><button class="toolbar-button" id="reset-button">↺</button></div></div>
+        <div id="viewport" class="viewport"><div class="viewport-loading" id="loading">Reading scan geometry…</div><div class="viewport-hud"><span class="view-tag">PERSPECTIVE</span><span class="unit-tag">MM</span></div><div class="orientation-cube"><span>U</span><small>ANT</small></div><div class="scale-bar"><span></span><small>10 mm</small></div><div class="viewport-legend"><span><i class="swatch prep"></i>Preparation</span><span><i class="swatch arch"></i>Prepared arch</span><span><i class="swatch opposing"></i>Antagonist</span><span><i class="swatch crown"></i>Restoration</span></div><div id="viewer-message" class="viewer-message"></div></div>
+        <div class="viewer-footer"><span><i class="tiny-dot"></i> <b id="mesh-count">0 meshes</b> in scene</span><span id="cursor-position">X — &nbsp; Y — &nbsp; Z —</span><span>Drag to orbit · wheel to zoom · shift-drag to pan</span></div>
+      </section>
+
+      <aside class="right-panel"><div class="right-panel-scroll">
+        <div class="panel-head design-head"><div><div class="eyebrow">DESIGN CONTROLS</div><h2>Restoration</h2></div><span class="draft-pill">DRAFT</span></div>
+        <div class="field-block"><label>Design target</label><div class="static-value">Single crown geometry preview</div></div>
+        <div class="field-block"><label for="design-source">Outer anatomy source</label><select id="design-source"><option value="reference">Reference crown · placed for review</option><option value="procedural">Procedural fallback · generic shell</option></select><p class="field-hint" id="reference-status">Uses the case reference mesh when available. Placement is bounding-box based and registration remains unverified.</p></div>
+        <div class="field-block two-col"><div><label>Case tooth</label><div class="static-value" id="tooth-label">Training label #3</div></div><div><label>Material profile</label><div class="static-value">Not applied</div></div></div>
+        <div class="section-rule"></div>
+        <div class="section-title"><span>01</span><div><b>Intaglio construction preview</b><small>Prep offset + solid Boolean; fit not measured</small></div></div>
+        <div class="field-block range-field"><div class="range-label"><label>Prep normal-offset input</label><output id="clearance-value">0.06 mm</output></div><input id="clearance" type="range" min="0.02" max="0.18" step="0.01" value="0.06"><div class="range-ends"><span>0.02</span><span>0.18 mm</span></div></div>
+        <div class="field-block range-field"><div class="range-label"><label>Horizontal trim depth</label><output id="margin-value">4.2 mm</output></div><input id="margin" type="range" min="2" max="7" step="0.1" value="4.2"><div class="range-ends"><span>2.0</span><span>7.0 mm below die top</span></div></div>
+        <div class="info-note"><span class="info-icon">i</span><p>The public demo uses synthetic blocks, not dental scans. This is not a traced 3D finish line or a measured cement gap. Trace and approve the margin in validated dental CAD before fabrication.</p></div>
+        <details class="align-details"><summary>Adjust antagonist scan position</summary><div class="align-grid"><label>ΔX mm<input id="opp-x" type="number" step="0.1" value="0"></label><label>ΔY mm<input id="opp-y" type="number" step="0.1" value="0"></label><label>ΔZ mm<input id="opp-z" type="number" step="0.1" value="0"></label><label>Rotate X°<input id="opp-rx" type="number" step="1" value="0"></label><label>Rotate Y°<input id="opp-ry" type="number" step="1" value="0"></label><label>Rotate Z°<input id="opp-rz" type="number" step="1" value="0"></label></div><label class="verify-bite"><input type="checkbox" id="bite-verified"> I checked this transform against a bite record</label><button class="reset-align" type="button" id="bite-reset">Reset antagonist transform</button><p class="align-caption">This checkbox is only a user note; the app does not register or verify a bite scan.</p></details>
+        <div class="section-rule"></div>
+        <div class="section-title"><span>02</span><div><b>Illustrative outer shell</b><small>Procedural form · no tooth library</small></div></div>
+        <div class="field-block range-field"><div class="range-label"><label>Envelope expansion input</label><output id="wall-value">1.0 mm</output></div><input id="wall" type="range" min="0.6" max="2" step="0.1" value="1"><div class="range-ends"><span>0.6</span><span>2.0 mm</span></div></div>
+        <div class="field-block range-field"><div class="range-label"><label>Illustrative cusp amplitude</label><output id="anatomy-value">Balanced</output></div><input id="anatomy" type="range" min="0" max="100" step="1" value="55"><div class="range-ends"><span>Smooth</span><span>Pronounced</span></div></div>
+        <button class="button button-generate" id="generate-button">Generate crown preview <span>↗</span></button>
+        <div class="design-status" id="design-status"><span class="status-icon">○</span><span>No design generated yet</span></div>
+        <div class="section-rule"></div>
+        <div class="section-title"><span>03</span><div><b>Quality checks</b><small>Geometric preview only</small></div></div>
+        <div class="qc-list"><div class="qc-item"><span>Prep cavity Boolean</span><b id="qc-fit" class="qc-pending">Pending</b></div><div class="qc-item"><span>Edge closure</span><b id="qc-closed" class="qc-pending">Pending</b></div><div class="qc-item"><span>Wall thickness</span><b id="qc-wall" class="qc-pending">Pending</b></div><div class="qc-item"><span>Unsigned sparse distance</span><b id="qc-occlusion" class="qc-warn">Unverified</b></div></div>
+        <div class="review-gate"><label><input type="checkbox" id="review-confirm"> I will have a qualified dental professional review fit, margins, contacts, occlusion, and material before use.</label></div>
+        <button class="button button-export" id="export-button-side" disabled>Export review STL</button>
+        <div class="export-note">Review-only STL. A closed mesh does not prove margin fit, wall thickness, bite registration, material suitability, or millability.</div>
+      </div><div class="right-panel-foot">OpenCusp CAD · local prototype · v0.1</div></aside>
+    </section>
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+</div>
+<dialog id="import-dialog" class="import-dialog">
+  <form method="dialog" class="import-form">
+    <div class="eyebrow">ADD SCAN TO CASE</div>
+    <h2>Assign scan details</h2>
+    <p id="import-file-name" class="import-file-name"></p>
+    <label for="import-role">Scan role</label>
+    <select id="import-role">
+      <option value="prep">Preparation / abutment</option>
+      <option value="upper">Prepared arch</option>
+      <option value="opposing">Antagonist</option>
+      <option value="preop">Pre-operative arch</option>
+      <option value="reference">Reference restoration</option>
+      <option value="scan">Other scan</option>
+    </select>
+    <label for="import-unit">Source coordinate units</label>
+    <select id="import-unit">
+      <option value="mm">Millimetres (mm)</option>
+      <option value="cm">Centimetres (cm)</option>
+      <option value="in">Inches (in)</option>
+    </select>
+    <p class="import-note">STL and PLY often omit units. Choose the units used by the source scan.</p>
+    <div class="import-actions"><button class="button button-quiet" value="cancel">Cancel</button><button class="button button-primary" type="submit" value="import">Import scan</button></div>
+  </form>
+</dialog>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

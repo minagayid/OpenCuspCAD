@@ -1,0 +1,19 @@
+# Dependencies and build output
+app/node_modules/
+app/dist/
+exports/
+
+# Local runtime state, uploads, generated proposals, and scratch evidence
+data/user_meshes/
+data/cases/
+work/
+*.log
+
+# The local BlueSky-linked practice set is not cleared for public redistribution.
+data/BlueSky_Crown_Practice/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

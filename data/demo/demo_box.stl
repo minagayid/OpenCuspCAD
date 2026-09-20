@@ -1,0 +1,86 @@
+solid opencusp_public_demo_box
+  facet normal 0 0 -1
+    outer loop
+      vertex -3 -3 0
+      vertex 3 3 0
+      vertex 3 -3 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex -3 -3 0
+      vertex -3 3 0
+      vertex 3 3 0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -3 -3 6
+      vertex 3 -3 6
+      vertex 3 3 6
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -3 -3 6
+      vertex 3 3 6
+      vertex -3 3 6
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -3 -3 0
+      vertex 3 -3 0
+      vertex 3 -3 6
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -3 -3 0
+      vertex 3 -3 6
+      vertex -3 -3 6
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 3 -3 0
+      vertex 3 3 0
+      vertex 3 3 6
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 3 -3 0
+      vertex 3 3 6
+      vertex 3 -3 6
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 3 3 0
+      vertex -3 3 0
+      vertex -3 3 6
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 3 3 0
+      vertex -3 3 6
+      vertex 3 3 6
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex -3 3 0
+      vertex -3 -3 0
+      vertex -3 -3 6
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex -3 3 0
+      vertex -3 -3 6
+      vertex -3 3 6
+    endloop
+  endfacet
+endsolid opencusp_public_demo_box

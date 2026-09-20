@@ -1,0 +1,62 @@
+{
+  "name": "opencusp-dental-cad",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first dental scan and restoration design workbench",
+  "type": "module",
+  "main": "electron-main.mjs",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,green \"npm:api:dev\" \"npm:web:dev\"",
+    "api:dev": "node server.mjs",
+    "web:dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "node --test",
+    "start": "node server.mjs",
+    "desktop:dev": "npm run build && electron .",
+    "desktop:pack": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "manifold-3d": "^3.5.3",
+    "multer": "^2.0.2",
+    "three": "^0.186.0",
+    "three-mesh-bvh": "^0.9.15"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3",
+    "vite": "^7.3.1"
+  },
+  "build": {
+    "appId": "org.opencusp.dentalcad",
+    "productName": "OpenCusp CAD",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "server.mjs",
+      "server-loaders/**/*",
+      "electron-main.mjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../data/demo",
+        "to": "data/demo"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "OpenCuspCAD-${version}-portable.exe"
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    },
+    "directories": {
+      "output": "../exports/desktop"
+    }
+  }
+}
