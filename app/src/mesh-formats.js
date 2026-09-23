@@ -1,4 +1,5 @@
 const finite = (value) => Number.isFinite(value);
+const FLOAT32_MAX = 3.4028234663852886e38;
 
 export const SURFACE_EXTENSIONS = Object.freeze(['.stl', '.ply', '.obj', '.off']);
 export const POINT_CLOUD_EXTENSIONS = Object.freeze(['.xyz', '.pts', '.csv', '.pcd']);
@@ -65,9 +66,9 @@ export function parseOffText(text) {
   return { geometryType: 'surface-mesh', positions, indices };
 }
 
-function pointFromFields(fields) {
-  if (fields.length < 3) return null;
-  const values = fields.slice(0, 3).map(Number);
+function pointFromFields(fields, indexes = [0, 1, 2]) {
+  if (fields.length <= Math.max(...indexes)) return null;
+  const values = indexes.map((index) => Number(fields[index]));
   return values.every(finite) ? values : null;
 }
 
@@ -93,9 +94,19 @@ export function parsePointCloudText(text, extension = '.xyz') {
     return { geometryType: 'point-cloud', positions, indices: [] };
   }
   if (extension === '.pts' && lines[0] && /^\d+$/.test(lines[0])) lines = lines.slice(1);
+  let indexes = [0, 1, 2];
+  if (extension === '.csv' && lines[0]) {
+    const header = lines[0].split(/[\s,;]+/).map((field) => field.toLowerCase());
+    const named = ['x', 'y', 'z'].map((name) => header.indexOf(name));
+    if (named.every((index) => index >= 0)) {
+      indexes = named;
+      lines = lines.slice(1);
+    }
+  }
   const positions = [];
   for (const line of lines) {
-    const point = pointFromFields(line.split(/[\s,;]+/));
+    const point = pointFromFields(line.split(/[\s,;]+/), indexes);
+    if (extension === '.csv' && !point) throw new Error('CSV contains an invalid or incomplete XYZ row.');
     if (point) positions.push(...point);
   }
   if (positions.length < 9) throw new Error('Point cloud contains fewer than three numeric XYZ points.');
@@ -110,11 +121,12 @@ export function parseMeshText(text, extension) {
   throw new Error('No text parser is registered for ' + ext + '.');
 }
 
-export function validateParsedGeometry(parsed, maxPoints = 5_000_000, maxTriangles = 1_000_000) {
+export function validateParsedGeometry(parsed, maxPoints = 5_000_000, maxTriangles = 1_000_000, unitToMm = 1) {
+  if (!finite(unitToMm) || unitToMm <= 0) throw new Error('Source unit scale must be a positive finite number.');
   if (!parsed || !Array.isArray(parsed.positions) || parsed.positions.length % 3 !== 0) throw new Error('Geometry coordinates are incomplete.');
   const vertices = parsed.positions.length / 3;
   if (vertices < 3 || vertices > maxPoints) throw new Error('Geometry must contain between 3 and ' + maxPoints.toLocaleString() + ' vertices.');
-  if (!parsed.positions.every(finite)) throw new Error('Geometry contains a non-finite coordinate.');
+  if (!parsed.positions.every((value) => finite(value) && Math.abs(value * unitToMm) <= FLOAT32_MAX)) throw new Error('Geometry contains a non-finite or Float32-overflow coordinate after unit scaling.');
   const triangles = parsed.indices.length / 3;
   if (!Number.isInteger(triangles) || (triangles < 1 && parsed.geometryType === 'surface-mesh')) throw new Error('Surface mesh contains no complete triangles.');
   if (triangles > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');

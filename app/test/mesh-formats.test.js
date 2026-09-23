@@ -29,4 +29,11 @@ test('parses XYZ, PTS, CSV, and ASCII PCD point clouds', () => {
 test('rejects non-finite and incomplete geometry', () => {
   assert.throws(() => parseMeshText('v 0 0 0\nv NaN 0 0\nv 0 1 0\nf 1 2 3\n', '.obj'), /non-finite/);
   assert.throws(() => parseMeshText('0 0\n1 0\n0 1\n', '.xyz'), /fewer than three/);
+  assert.throws(() => validateParsedGeometry({ geometryType: 'point-cloud', positions: [3.5e38, 0, 0, 0, 1, 0, 0, 0, 1], indices: [] }), /Float32-overflow/);
+});
+
+test('maps reordered CSV XYZ columns from a header', () => {
+  const parsed = parseMeshText('id,z,x,y\na,0,0,0\nb,0,1,0\nc,0,0,1\n', '.csv');
+  assert.deepEqual(parsed.positions, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  assert.throws(() => parseMeshText('x,y,z\n0,0\n1,0,0\n0,1,0\n', '.csv'), /invalid or incomplete/);
 });

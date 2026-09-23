@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { STLLoader } from './server-loaders/STLLoader.js';
 import { PLYLoader } from './server-loaders/PLYLoader.js';
 import { parseMeshText, validateParsedGeometry } from './src/mesh-formats.js';
+import { inspectClosedMesh } from './src/mesh-validation.js';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(appDir, '..');
@@ -61,7 +62,7 @@ app.use((req, res, next) => {
   next();
 });
 
-async function validateUploadedMesh(file) {
+async function validateUploadedMesh(file, unitToMm = 1) {
   const bytes = await fs.readFile(file.path);
   const ext = path.extname(file.originalname).toLowerCase();
   if (ext === '.stl') {
@@ -69,12 +70,12 @@ async function validateUploadedMesh(file) {
       const triangles = bytes.readUInt32LE(80);
       if (triangles > 0 && bytes.length === 84 + triangles * 50) {
         if (triangles > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');
-        return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
+        return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes)), { unitToMm }), geometryType: 'surface-mesh' };
       }
     }
     const text = bytes.subarray(0, Math.min(bytes.length, 2048)).toString('ascii').trimStart();
     if (/^solid\b/i.test(text) && /endsolid\b/i.test(bytes.subarray(Math.max(0, bytes.length - 2048)).toString('ascii'))) {
-      return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
+      return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes)), { unitToMm }), geometryType: 'surface-mesh' };
     }
     throw new Error('The STL file does not have a valid binary length or ASCII solid header.');
   }
@@ -87,12 +88,13 @@ async function validateUploadedMesh(file) {
     if (!/^ply\s/.test(header) || !/^format (ascii|binary_little_endian|binary_big_endian) 1\.0$/m.test(header) || !vertexCount) {
       throw new Error('The PLY header is missing a supported format or vertex declaration.');
     }
+    if (faceCount < 1) throw new Error('PLY point clouds without faces are not accepted as surface meshes; use XYZ, PTS, CSV, or ASCII PCD for point-cloud input.');
     if (vertexCount > maxTriangles * 3 || faceCount > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');
-    return { ...validateGeometry(new PLYLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
+    return { ...validateGeometry(new PLYLoader().parse(toArrayBuffer(bytes)), { unitToMm }), geometryType: 'surface-mesh' };
   }
   if (['.obj', '.off', '.xyz', '.pts', '.csv', '.pcd'].includes(ext)) {
     const parsed = parseMeshText(bytes.toString('utf8'), ext);
-    return validateParsedGeometry(parsed);
+    return validateParsedGeometry(parsed, 5_000_000, maxTriangles, unitToMm);
   }
   throw new Error('Unsupported mesh type.');
 }
@@ -101,7 +103,7 @@ function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
-function validateGeometry(geometry) {
+function validateGeometry(geometry, { requireClosed = false, unitToMm = 1 } = {}) {
   try {
     const position = geometry.attributes.position;
     const triangleCount = geometry.index ? geometry.index.count / 3 : position?.count / 3;
@@ -109,7 +111,11 @@ function validateGeometry(geometry) {
     if (triangleCount > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');
     const coords = position.array;
     for (let i = 0; i < coords.length; i++) {
-      if (!Number.isFinite(coords[i])) throw new Error('Mesh contains a non-finite vertex coordinate.');
+      if (!Number.isFinite(coords[i]) || Math.abs(coords[i] * unitToMm) > 3.4028234663852886e38) throw new Error('Mesh contains a non-finite or Float32-overflow coordinate after unit scaling.');
+    }
+    if (requireClosed) {
+      const topology = inspectClosedMesh(geometry);
+      if (!topology.closed) throw new Error('Saved proposal mesh is not a single closed finite solid.');
     }
     return { triangles: triangleCount, vertices: position.count };
   } finally {
@@ -184,8 +190,19 @@ function safeCaseId(raw) {
   const safe = id.replace(/[^a-z0-9_-]/gi, '').slice(0, 64);
   return safe && safe === id ? safe : null;
 }
+function jsonSha256(value) {
+  return createHash('sha256').update(JSON.stringify(value ?? {}), 'utf8').digest('hex');
+}
 async function readSavedCase(safeId) {
   return JSON.parse(await fs.readFile(path.join(stateDir, safeId + '.json'), 'utf8'));
+}
+async function verifySavedProposal(safeId, expectedHash) {
+  const file = path.join(stateDir, safeId + '-proposal-' + expectedHash.toLowerCase() + '.stl');
+  const bytes = await fs.readFile(file);
+  const actualHash = createHash('sha256').update(bytes).digest('hex');
+  if (actualHash !== expectedHash.toLowerCase()) throw new Error('Saved proposal checksum does not match the approval fingerprint.');
+  validateGeometry(new STLLoader().parse(toArrayBuffer(bytes)), { requireClosed: true });
+  return { bytes: bytes.length, sha256: actualHash };
 }
 async function writeStateFile(file, value) {
   const temp = file + '.' + process.pid + '.tmp';
@@ -194,7 +211,8 @@ async function writeStateFile(file, value) {
 }
 app.post('/api/upload', upload.single('mesh'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No mesh file received.' });
-  validateUploadedMesh(req.file).then((meshInfo) => fs.readFile(req.file.path).then((bytes) => ({ meshInfo, bytes }))).then(({ meshInfo, bytes }) => {
+  const unitToMm = ({ mm: 1, cm: 10, in: 25.4 })[String(req.body.sourceUnit || 'mm')] || 1;
+  validateUploadedMesh(req.file, unitToMm).then((meshInfo) => fs.readFile(req.file.path).then((bytes) => ({ meshInfo, bytes }))).then(({ meshInfo, bytes }) => {
     res.json({
       name: req.file.originalname,
       role: req.body.role || 'scan',
@@ -233,12 +251,17 @@ app.post('/api/design/:id/approval', async (req, res) => {
   const safeId = safeCaseId(req.params.id);
   if (!safeId) return res.status(400).json({ error: 'Invalid case id.' });
   const body = req.body || {};
-  if (body.approved !== true || !String(body.reviewerName || '').trim() || !String(body.approvalId || '').trim() || !/^[a-f0-9]{64}$/i.test(body.designFingerprint || '')) {
-    return res.status(400).json({ error: 'Approval requires approved=true, reviewer name, approval ID, and a design fingerprint.' });
+  if (body.approved !== true || !String(body.reviewerName || '').trim() || !String(body.approvalId || '').trim() || !/^[a-f0-9]{64}$/i.test(body.designFingerprint || '') || !/^[a-f0-9]{64}$/i.test(body.designContextFingerprint || '')) {
+    return res.status(400).json({ error: 'Approval requires approved=true, reviewer name, approval ID, design fingerprint, and design-context fingerprint.' });
   }
   let saved;
   try { saved = await readSavedCase(safeId); } catch { return res.status(404).json({ error: 'Save the design before requesting approval.' }); }
-  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint) return res.status(409).json({ error: 'Approval fingerprint does not match a fresh saved proposal.' });
+  const restorationType = saved.currentDesignInputs?.designBrief?.restorationType;
+  if (restorationType !== 'single-crown') return res.status(409).json({ error: 'This restoration type is brief-only and cannot receive a manufacturing approval in the current release.' });
+  const savedContextFingerprint = jsonSha256(saved.currentDesignInputs);
+  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint || savedContextFingerprint !== body.designContextFingerprint.toLowerCase()) return res.status(409).json({ error: 'Approval fingerprint does not match a fresh saved proposal and context.' });
+  try { await verifySavedProposal(safeId, body.designFingerprint); }
+  catch (error) { return res.status(409).json({ error: error.message || 'The saved proposal could not be independently verified.' }); }
   const approval = {
     schemaVersion: 1,
     approved: true,
@@ -248,10 +271,51 @@ app.post('/api/design/:id/approval', async (req, res) => {
     approvalId: String(body.approvalId).trim().slice(0, 160),
     note: String(body.note || '').trim().slice(0, 2000),
     designFingerprint: body.designFingerprint.toLowerCase(),
+    designContextFingerprint: body.designContextFingerprint.toLowerCase(),
     reviewedAt: String(body.reviewedAt || new Date().toISOString())
   };
   await writeStateFile(path.join(stateDir, safeId + '-approval.json'), approval);
   res.json({ ok: true, approval });
+});
+app.put('/api/design/:id/cam-artifact', express.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
+  const safeId = safeCaseId(req.params.id);
+  if (!safeId) return res.status(400).json({ error: 'Invalid case id.' });
+  const format = String(req.get('x-cam-format') || '').toLowerCase();
+  const designFingerprint = String(req.get('x-design-fingerprint') || '').toLowerCase();
+  const designContextFingerprint = String(req.get('x-design-context-fingerprint') || '').toLowerCase();
+  if (!['stl', 'obj'].includes(format) || !/^[a-f0-9]{64}$/.test(designFingerprint) || !/^[a-f0-9]{64}$/.test(designContextFingerprint)) {
+    return res.status(400).json({ error: 'CAM artifact requires STL/OBJ format and valid design/context fingerprints.' });
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length < 16) return res.status(400).json({ error: 'CAM artifact is empty.' });
+  let saved, approval;
+  try {
+    saved = await readSavedCase(safeId);
+    approval = JSON.parse(await fs.readFile(path.join(stateDir, safeId + '-approval.json'), 'utf8'));
+  } catch {
+    return res.status(403).json({ error: 'A saved professional approval is required before CAM artifact upload.' });
+  }
+  const restorationType = saved.currentDesignInputs?.designBrief?.restorationType;
+  const savedContextFingerprint = jsonSha256(saved.currentDesignInputs);
+  if (restorationType !== 'single-crown' || saved.designStale === true || saved.generatedMesh?.sha256 !== designFingerprint || savedContextFingerprint !== designContextFingerprint || approval.approved !== true || approval.designFingerprint !== designFingerprint || approval.designContextFingerprint !== designContextFingerprint) {
+    return res.status(409).json({ error: 'CAM artifact is blocked because approval and the saved proposal do not match.' });
+  }
+  try {
+    await verifySavedProposal(safeId, designFingerprint);
+    if (format === 'stl') {
+      validateGeometry(new STLLoader().parse(toArrayBuffer(req.body)), { requireClosed: true });
+    } else {
+      const parsed = parseMeshText(req.body.toString('utf8'), '.obj');
+      if (parsed.geometryType !== 'surface-mesh') throw new Error('OBJ CAM artifact must contain faces.');
+      validateParsedGeometry(parsed);
+    }
+  } catch (error) {
+    return res.status(409).json({ error: error.message || 'The CAM artifact failed independent validation.' });
+  }
+  const sha256 = createHash('sha256').update(req.body).digest('hex');
+  const fileName = safeId + '-CAM-REVIEW-REQUIRED.' + format;
+  const file = path.join(stateDir, safeId + '-cam-artifact-' + sha256 + '.' + format);
+  await fs.writeFile(file, req.body);
+  res.json({ ok: true, sha256, bytes: req.body.length, format, fileName });
 });
 app.post('/api/design/:id/cam-handoff', async (req, res) => {
   const safeId = safeCaseId(req.params.id);
@@ -259,8 +323,8 @@ app.post('/api/design/:id/cam-handoff', async (req, res) => {
   const body = req.body || {};
   const format = String(body.format || '').toLowerCase();
   if (!['stl', 'obj'].includes(format)) return res.status(400).json({ error: 'CAM handoff format must be STL or OBJ.' });
-  if (!/^[a-f0-9]{64}$/i.test(body.designFingerprint || '') || !String(body.machineProfile || '').trim() || !String(body.camVersion || '').trim() || !String(body.material || '').trim() || !String(body.blank || '').trim() || !String(body.toolProfile || '').trim()) {
-    return res.status(400).json({ error: 'CAM handoff requires a matching fingerprint and named machine, CAM version, material, blank, and tool profile.' });
+  if (!/^[a-f0-9]{64}$/i.test(body.designFingerprint || '') || !/^[a-f0-9]{64}$/i.test(body.designContextFingerprint || '') || !/^[a-f0-9]{64}$/i.test(body.artifactSha256 || '') || !String(body.machineProfile || '').trim() || !String(body.camVersion || '').trim() || !String(body.material || '').trim() || !String(body.blank || '').trim() || !String(body.toolProfile || '').trim()) {
+    return res.status(400).json({ error: 'CAM handoff requires matching design, context, and artifact fingerprints plus named machine, CAM version, material, blank, and tool profile.' });
   }
   let saved, approval;
   try {
@@ -269,9 +333,20 @@ app.post('/api/design/:id/cam-handoff', async (req, res) => {
   } catch {
     return res.status(403).json({ error: 'A saved professional approval is required before CAM handoff.' });
   }
-  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint || approval.approved !== true || approval.designFingerprint !== body.designFingerprint) {
+  const restorationType = saved.currentDesignInputs?.designBrief?.restorationType;
+  if (restorationType !== 'single-crown') return res.status(409).json({ error: 'This restoration type is brief-only and cannot be sent to CAM.' });
+  if (body.restorationType && String(body.restorationType) !== restorationType) return res.status(409).json({ error: 'CAM handoff restoration type does not match the saved design brief.' });
+  const savedContextFingerprint = jsonSha256(saved.currentDesignInputs);
+  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint || savedContextFingerprint !== body.designContextFingerprint.toLowerCase() || approval.approved !== true || approval.designFingerprint !== body.designFingerprint || approval.designContextFingerprint !== body.designContextFingerprint.toLowerCase()) {
     return res.status(409).json({ error: 'CAM handoff is blocked because approval and the saved proposal do not match.' });
   }
+  try { await verifySavedProposal(safeId, body.designFingerprint); }
+  catch (error) { return res.status(409).json({ error: error.message || 'The saved proposal could not be independently verified.' }); }
+  const artifactFile = path.join(stateDir, safeId + '-cam-artifact-' + body.artifactSha256.toLowerCase() + '.' + format);
+  let artifactBytes;
+  try { artifactBytes = await fs.readFile(artifactFile); }
+  catch { return res.status(409).json({ error: 'Upload the exact CAM artifact before creating its handoff manifest.' }); }
+  if (createHash('sha256').update(artifactBytes).digest('hex') !== body.artifactSha256.toLowerCase()) return res.status(409).json({ error: 'CAM artifact checksum verification failed.' });
   const stamp = new Date().toISOString();
   const manifest = {
     schemaVersion: 1,
@@ -284,7 +359,8 @@ app.post('/api/design/:id/cam-handoff', async (req, res) => {
       format,
       units: 'mm',
       fileName: safeId + '-CAM-REVIEW-REQUIRED.' + format,
-      sha256: body.designFingerprint,
+      sha256: body.artifactSha256.toLowerCase(),
+      designFingerprint: body.designFingerprint.toLowerCase(),
       status: 'CAM_SIMULATION_AND_OPERATOR_CHECK_REQUIRED'
     },
     machine: {
@@ -295,8 +371,8 @@ app.post('/api/design/:id/cam-handoff', async (req, res) => {
       toolProfile: String(body.toolProfile).trim().slice(0, 200)
     },
     sourceFormats: Array.isArray(body.sourceFormats) ? body.sourceFormats.map((value) => String(value).slice(0, 12)).slice(0, 32) : [],
-    restorationType: String(body.restorationType || 'single-crown').slice(0, 80),
-    approval: { reviewerName: approval.reviewerName, reviewerRole: approval.reviewerRole, approvalId: approval.approvalId, reviewedAt: approval.reviewedAt, designFingerprint: approval.designFingerprint },
+    restorationType,
+    approval: { reviewerName: approval.reviewerName, reviewerRole: approval.reviewerRole, approvalId: approval.approvalId, reviewedAt: approval.reviewedAt, designFingerprint: approval.designFingerprint, designContextFingerprint: approval.designContextFingerprint },
     warning: 'This package is not a validated toolpath. The authorized operator must import it into the named CAM system, confirm units and orientation, run the exact machine/material simulation, and approve fabrication.'
   };
   manifest.manifestFileName = safeId + '-CAM-handoff.json';

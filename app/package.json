@@ -36,6 +36,7 @@
       "dist/**/*",
       "server.mjs",
       "src/mesh-formats.js",
+      "src/mesh-validation.js",
       "server-loaders/**/*",
       "electron-main.mjs",
       "package.json",

@@ -55,6 +55,7 @@ GitHub Actions runs the same test and build checks for pushes and pull requests.
 - stores local case manifests, SHA-256 provenance, and generated review STL;
 - keeps review export behind an acknowledgement and gates the local CAM handoff behind a fingerprinted approval record and operator-entered CAM profile;
 - provides local Markdown skills for input data, professional dental design, anatomy references, and CAM approval.
+- includes a restoration-routing library for crowns, copings/cutbacks, inlays/onlays, veneers, bridges, implant crowns, and custom abutments; unsupported geometry remains explicitly brief-only.
 
 The workflow is intentionally bounded. A closed mesh does not prove margin fit,
 wall thickness, occlusion, material suitability, or millability.

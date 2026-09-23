@@ -15,7 +15,8 @@ OpenCuspCAD produces a local handoff package; it does not connect to or transmit
 
 ## Handoff invariants
 
-- The manifest contains the design fingerprint, case ID, source format list, geometry format, millimetre units, approval summary, machine profile, CAM version, material, blank, and tool profile.
+- The manifest contains separate design-context and exact exported-artifact fingerprints, case ID, source format list, geometry format, millimetre units, approval summary, machine profile, CAM version, material, blank, and tool profile.
+- The local service receives and hashes the exact STL/OBJ artifact before creating the manifest; a browser-supplied checksum alone is not accepted.
 - A changed design invalidates the approval and blocks the handoff until it is reviewed again.
 - The generic machine profile is an explicit placeholder and is not a machine postprocessor.
 - The handoff status is `CAM_SIMULATION_AND_OPERATOR_CHECK_REQUIRED`.
@@ -24,4 +25,3 @@ OpenCuspCAD produces a local handoff package; it does not connect to or transmit
 ## Stop conditions
 
 Stop and return to review when the file is stale, the checksum differs, approval is missing, the restoration is an abutment brief, units are uncertain, the mesh is open or invalid, the CAM profile is unvalidated, or the material/blank/tool data do not match the manufacturing prescription.
-
