@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { STLLoader } from './server-loaders/STLLoader.js';
 import { PLYLoader } from './server-loaders/PLYLoader.js';
+import { parseMeshText, validateParsedGeometry } from './src/mesh-formats.js';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(appDir, '..');
@@ -45,7 +46,7 @@ const upload = multer({
   limits: { fileSize: 64 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (!['.stl', '.ply'].includes(ext)) return callback(new Error('Only STL and PLY meshes are supported.'));
+    if (!['.stl', '.ply', '.obj', '.off', '.xyz', '.pts', '.csv', '.pcd'].includes(ext)) return callback(new Error('Supported inputs are STL, PLY, OBJ, OFF, XYZ, PTS, CSV, and ASCII PCD.'));
     callback(null, true);
   }
 });
@@ -68,12 +69,12 @@ async function validateUploadedMesh(file) {
       const triangles = bytes.readUInt32LE(80);
       if (triangles > 0 && bytes.length === 84 + triangles * 50) {
         if (triangles > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');
-        return validateGeometry(new STLLoader().parse(toArrayBuffer(bytes)));
+        return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
       }
     }
     const text = bytes.subarray(0, Math.min(bytes.length, 2048)).toString('ascii').trimStart();
     if (/^solid\b/i.test(text) && /endsolid\b/i.test(bytes.subarray(Math.max(0, bytes.length - 2048)).toString('ascii'))) {
-      return validateGeometry(new STLLoader().parse(toArrayBuffer(bytes)));
+      return { ...validateGeometry(new STLLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
     }
     throw new Error('The STL file does not have a valid binary length or ASCII solid header.');
   }
@@ -87,7 +88,11 @@ async function validateUploadedMesh(file) {
       throw new Error('The PLY header is missing a supported format or vertex declaration.');
     }
     if (vertexCount > maxTriangles * 3 || faceCount > maxTriangles) throw new Error('Mesh exceeds the local preview limit of ' + maxTriangles.toLocaleString() + ' triangles.');
-    return validateGeometry(new PLYLoader().parse(toArrayBuffer(bytes)));
+    return { ...validateGeometry(new PLYLoader().parse(toArrayBuffer(bytes))), geometryType: 'surface-mesh' };
+  }
+  if (['.obj', '.off', '.xyz', '.pts', '.csv', '.pcd'].includes(ext)) {
+    const parsed = parseMeshText(bytes.toString('utf8'), ext);
+    return validateParsedGeometry(parsed);
   }
   throw new Error('Unsupported mesh type.');
 }
@@ -115,7 +120,14 @@ function validateGeometry(geometry) {
 app.use('/sample', express.static(sampleDir, { fallthrough: false, maxAge: 0 }));
 app.use('/user-meshes', express.static(userDir, { fallthrough: false, maxAge: 0 }));
 app.use(express.json({ limit: '2mb' }));
-app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'OpenCusp CAD', localOnly: true }));
+app.get('/api/health', (_req, res) => res.json({
+  ok: true,
+  app: 'OpenCusp CAD',
+  localOnly: true,
+  acceptedInputFormats: ['stl', 'ply', 'obj', 'off', 'xyz', 'pts', 'csv', 'pcd-ascii'],
+  camHandoffFormats: ['stl', 'obj'],
+  directMachineTransmission: false
+}));
 app.get('/api/cases', async (_req, res) => {
   const names = await fs.readdir(stateDir);
   const cases = [];
@@ -167,6 +179,19 @@ app.get('/api/demo', async (_req, res) => {
     res.status(503).json({ error: 'The configured demo fixture is unavailable: ' + error.message });
   }
 });
+function safeCaseId(raw) {
+  const id = String(raw || '');
+  const safe = id.replace(/[^a-z0-9_-]/gi, '').slice(0, 64);
+  return safe && safe === id ? safe : null;
+}
+async function readSavedCase(safeId) {
+  return JSON.parse(await fs.readFile(path.join(stateDir, safeId + '.json'), 'utf8'));
+}
+async function writeStateFile(file, value) {
+  const temp = file + '.' + process.pid + '.tmp';
+  await fs.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
+  await fs.rename(temp, file);
+}
 app.post('/api/upload', upload.single('mesh'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No mesh file received.' });
   validateUploadedMesh(req.file).then((meshInfo) => fs.readFile(req.file.path).then((bytes) => ({ meshInfo, bytes }))).then(({ meshInfo, bytes }) => {
@@ -176,6 +201,8 @@ app.post('/api/upload', upload.single('mesh'), (req, res) => {
       url: '/user-meshes/' + encodeURIComponent(req.file.filename),
       bytes: req.file.size,
       triangles: meshInfo.triangles,
+      vertices: meshInfo.vertices,
+      geometryType: meshInfo.geometryType,
       sha256: createHash('sha256').update(bytes).digest('hex')
     });
   }).catch(async (error) => {
@@ -192,6 +219,89 @@ app.get('/api/design/:id', async (req, res) => {
   } catch {
     res.status(404).json({ error: 'No saved design for this case.' });
   }
+});
+app.get('/api/design/:id/approval', async (req, res) => {
+  const safeId = safeCaseId(req.params.id);
+  if (!safeId) return res.status(400).json({ error: 'Invalid case id.' });
+  try {
+    res.type('json').send(await fs.readFile(path.join(stateDir, safeId + '-approval.json'), 'utf8'));
+  } catch {
+    res.status(404).json({ error: 'No approval record exists for this design.' });
+  }
+});
+app.post('/api/design/:id/approval', async (req, res) => {
+  const safeId = safeCaseId(req.params.id);
+  if (!safeId) return res.status(400).json({ error: 'Invalid case id.' });
+  const body = req.body || {};
+  if (body.approved !== true || !String(body.reviewerName || '').trim() || !String(body.approvalId || '').trim() || !/^[a-f0-9]{64}$/i.test(body.designFingerprint || '')) {
+    return res.status(400).json({ error: 'Approval requires approved=true, reviewer name, approval ID, and a design fingerprint.' });
+  }
+  let saved;
+  try { saved = await readSavedCase(safeId); } catch { return res.status(404).json({ error: 'Save the design before requesting approval.' }); }
+  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint) return res.status(409).json({ error: 'Approval fingerprint does not match a fresh saved proposal.' });
+  const approval = {
+    schemaVersion: 1,
+    approved: true,
+    caseId: safeId,
+    reviewerName: String(body.reviewerName).trim().slice(0, 160),
+    reviewerRole: String(body.reviewerRole || 'qualified dental reviewer').trim().slice(0, 160),
+    approvalId: String(body.approvalId).trim().slice(0, 160),
+    note: String(body.note || '').trim().slice(0, 2000),
+    designFingerprint: body.designFingerprint.toLowerCase(),
+    reviewedAt: String(body.reviewedAt || new Date().toISOString())
+  };
+  await writeStateFile(path.join(stateDir, safeId + '-approval.json'), approval);
+  res.json({ ok: true, approval });
+});
+app.post('/api/design/:id/cam-handoff', async (req, res) => {
+  const safeId = safeCaseId(req.params.id);
+  if (!safeId) return res.status(400).json({ error: 'Invalid case id.' });
+  const body = req.body || {};
+  const format = String(body.format || '').toLowerCase();
+  if (!['stl', 'obj'].includes(format)) return res.status(400).json({ error: 'CAM handoff format must be STL or OBJ.' });
+  if (!/^[a-f0-9]{64}$/i.test(body.designFingerprint || '') || !String(body.machineProfile || '').trim() || !String(body.camVersion || '').trim() || !String(body.material || '').trim() || !String(body.blank || '').trim() || !String(body.toolProfile || '').trim()) {
+    return res.status(400).json({ error: 'CAM handoff requires a matching fingerprint and named machine, CAM version, material, blank, and tool profile.' });
+  }
+  let saved, approval;
+  try {
+    saved = await readSavedCase(safeId);
+    approval = JSON.parse(await fs.readFile(path.join(stateDir, safeId + '-approval.json'), 'utf8'));
+  } catch {
+    return res.status(403).json({ error: 'A saved professional approval is required before CAM handoff.' });
+  }
+  if (saved.designStale === true || saved.generatedMesh?.sha256 !== body.designFingerprint || approval.approved !== true || approval.designFingerprint !== body.designFingerprint) {
+    return res.status(409).json({ error: 'CAM handoff is blocked because approval and the saved proposal do not match.' });
+  }
+  const stamp = new Date().toISOString();
+  const manifest = {
+    schemaVersion: 1,
+    product: 'OpenCusp Dental CAD',
+    caseId: safeId,
+    createdAt: stamp,
+    delivery: 'local-file-handoff-only',
+    directMachineTransmission: false,
+    geometry: {
+      format,
+      units: 'mm',
+      fileName: safeId + '-CAM-REVIEW-REQUIRED.' + format,
+      sha256: body.designFingerprint,
+      status: 'CAM_SIMULATION_AND_OPERATOR_CHECK_REQUIRED'
+    },
+    machine: {
+      profile: String(body.machineProfile).trim().slice(0, 200),
+      camVersion: String(body.camVersion).trim().slice(0, 120),
+      material: String(body.material).trim().slice(0, 120),
+      blank: String(body.blank).trim().slice(0, 200),
+      toolProfile: String(body.toolProfile).trim().slice(0, 200)
+    },
+    sourceFormats: Array.isArray(body.sourceFormats) ? body.sourceFormats.map((value) => String(value).slice(0, 12)).slice(0, 32) : [],
+    restorationType: String(body.restorationType || 'single-crown').slice(0, 80),
+    approval: { reviewerName: approval.reviewerName, reviewerRole: approval.reviewerRole, approvalId: approval.approvalId, reviewedAt: approval.reviewedAt, designFingerprint: approval.designFingerprint },
+    warning: 'This package is not a validated toolpath. The authorized operator must import it into the named CAM system, confirm units and orientation, run the exact machine/material simulation, and approve fabrication.'
+  };
+  manifest.manifestFileName = safeId + '-CAM-handoff.json';
+  await writeStateFile(path.join(stateDir, safeId + '-cam-handoff.json'), manifest);
+  res.json({ ok: true, manifest });
 });
 app.post('/api/design/:id', async (req, res) => {
   const safeId = String(req.params.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 64);

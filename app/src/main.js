@@ -9,6 +9,7 @@ import { inspectClosedMesh } from './mesh-validation.js';
 import ManifoldModule from 'manifold-3d/manifold';
 import manifoldWasmUrl from 'manifold-3d/manifold.wasm?url';
 import { MeshBVH } from 'three-mesh-bvh';
+import { ACCEPTED_EXTENSIONS, POINT_CLOUD_EXTENSIONS, parseMeshText } from './mesh-formats.js';
 import './styles.css';
 import './case-ui.css';
 import './import-ui.css';
@@ -57,6 +58,8 @@ let isSwitchingCase = false;
 let generationToken = 0;
 let toastTimer = null;
 let referenceTarget = null;
+let approvalRecord = null;
+let savedDesignHash = null;
 const raycaster = new THREE.Raycaster();
 let manifoldWasm = null;
 let lastOcclusionGap = null;
@@ -68,6 +71,10 @@ const materialFor = (color, opacity) => new THREE.MeshStandardMaterial({
   color: new THREE.Color(color), roughness: 0.61, metalness: 0.02,
   transparent: opacity < 0.99, opacity, depthWrite: opacity >= 0.99,
   side: THREE.DoubleSide
+});
+const pointMaterialFor = (color, opacity) => new THREE.PointsMaterial({
+  color: new THREE.Color(color), size: 0.12, sizeAttenuation: true,
+  transparent: opacity < 0.99, opacity, depthWrite: false
 });
 
 function notify(text, duration = 2400) {
@@ -83,8 +90,27 @@ function showViewerMessage(text) {
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2200);
 }
-function fileLoader(url, ext) {
-  return (ext.toLowerCase() === '.ply' ? plyLoader : stlLoader).loadAsync(url);
+function fileExtension(url) {
+  const clean = String(url).split('?')[0].toLowerCase();
+  const index = clean.lastIndexOf('.');
+  return index >= 0 ? clean.slice(index) : '';
+}
+function geometryFromParsed(parsed) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(parsed.positions, 3));
+  if (parsed.indices.length) geometry.setIndex(parsed.indices);
+  if (parsed.geometryType === 'surface-mesh') geometry.computeVertexNormals();
+  return geometry;
+}
+async function fileLoader(url, ext, sourceBuffer = null) {
+  if (ext === '.ply') return plyLoader.parse(sourceBuffer || await (await fetch(url)).arrayBuffer());
+  if (ext === '.stl') return stlLoader.parse(sourceBuffer || await (await fetch(url)).arrayBuffer());
+  const text = sourceBuffer ? new TextDecoder().decode(sourceBuffer) : await (async () => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Could not read mesh resource: ' + url);
+    return response.text();
+  })();
+  return geometryFromParsed(parseMeshText(text, ext));
 }
 async function sha256Hex(buffer) {
   const digest = await crypto.subtle.digest('SHA-256', buffer);
@@ -151,7 +177,9 @@ function updateMeshList() {
     name.textContent = mesh.userData.name;
     const info = document.createElement('span');
     info.className = 'mesh-info';
-    info.textContent = (vertexCount(mesh.geometry) / 1000).toFixed(0) + 'k';
+    info.textContent = mesh.userData.geometryType === 'point-cloud'
+      ? (vertexCount(mesh.geometry) / 1000).toFixed(0) + 'k pts'
+      : (triangleCount(mesh.geometry) / 1000).toFixed(0) + 'k tri';
     row.append(toggle, swatch, name, info);
     container.append(row);
   }
@@ -159,22 +187,26 @@ function updateMeshList() {
   updateCaseInputStatus();
 }
 async function loadMesh(record) {
-  const ext = record.url.toLowerCase().endsWith('.ply') ? '.ply' : '.stl';
+  const ext = fileExtension(record.url);
+  if (!ACCEPTED_EXTENSIONS.includes(ext)) throw new Error('Unsupported scan format: ' + ext);
   const response = await fetch(record.url);
   if (!response.ok) throw new Error('Could not read mesh resource: ' + record.url);
   const sourceBuffer = await response.arrayBuffer();
   const sourceSha256 = await sha256Hex(sourceBuffer);
   if (record.sha256 && record.sha256 !== sourceSha256) throw new Error('Mesh hash does not match the saved case manifest: ' + record.name);
-  const geometry = ext === '.ply' ? plyLoader.parse(sourceBuffer) : stlLoader.parse(sourceBuffer);
+  const geometry = await fileLoader(record.url, ext, sourceBuffer);
+  const geometryType = record.geometryType || (POINT_CLOUD_EXTENSIONS.includes(ext) ? 'point-cloud' : 'surface-mesh');
   const unitToMm = Number.isFinite(record.unitToMm) && record.unitToMm > 0 ? record.unitToMm : 1;
   if (unitToMm !== 1) geometry.scale(unitToMm, unitToMm, unitToMm);
-  if (!geometry.attributes.normal) geometry.computeVertexNormals();
+  if (geometryType === 'surface-mesh' && !geometry.attributes.normal) geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   const opacity = record.opacity == null ? 1 : record.opacity;
-  const mesh = new THREE.Mesh(geometry, materialFor(record.color || roleColors[record.role] || '#93a6a4', opacity));
+  const mesh = geometryType === 'point-cloud'
+    ? new THREE.Points(geometry, pointMaterialFor(record.color || roleColors[record.role] || '#93a6a4', opacity))
+    : new THREE.Mesh(geometry, materialFor(record.color || roleColors[record.role] || '#93a6a4', opacity));
   mesh.name = record.name;
-  mesh.userData = { ...record, sha256: sourceSha256, unit: 'mm', unitToMm, unitProvenance: record.unitProvenance || 'Assumed millimetres; verify source before use', originalGeometry: geometry };
+  mesh.userData = { ...record, geometryType, sha256: sourceSha256, unit: 'mm', unitToMm, unitProvenance: record.unitProvenance || 'Assumed millimetres; verify source before use', originalGeometry: geometry };
   mesh.visible = record.visible !== false;
   if (Array.isArray(record.transform?.position)) mesh.position.fromArray(record.transform.position);
   if (Array.isArray(record.transform?.rotation)) mesh.rotation.fromArray(record.transform.rotation);
@@ -199,6 +231,26 @@ function setQc(id, text, kind = 'pending') {
   item.textContent = text;
   item.className = 'qc-' + kind;
 }
+function setApprovalStatus(message, kind = 'pending') {
+  const item = $('approval-status');
+  if (!item) return;
+  item.textContent = message;
+  item.className = 'approval-status ' + kind;
+}
+function updateApprovalUI() {
+  const current = Boolean(approvalRecord && savedDesignHash && approvalRecord.designFingerprint === savedDesignHash && designMesh && !designIsStale() && $('review-confirm')?.checked);
+  if (current) {
+    setApprovalStatus('Approved by ' + approvalRecord.reviewerName + ' · ' + approvalRecord.approvalId, 'approved');
+  } else {
+    setApprovalStatus('Not approved for CAM handoff', 'pending');
+  }
+  if ($('approval-button')) $('approval-button').disabled = !designMesh || !lastDesignClosed || designIsStale();
+  if ($('cam-handoff-button')) $('cam-handoff-button').disabled = !current;
+}
+function clearApprovalState() {
+  approvalRecord = null;
+  updateApprovalUI();
+}
 function clearDesign() {
   generationToken++;
   if (designMesh) {
@@ -212,7 +264,9 @@ function clearDesign() {
   $('export-button-side').disabled = true;
   $('review-confirm').checked = false;
   designSnapshot = null;
+  savedDesignHash = null;
   lastDesignClosed = false;
+  clearApprovalState();
   setQc('qc-fit', 'Pending', 'pending');
   setQc('qc-closed', 'Pending', 'pending');
   setQc('qc-wall', 'Pending', 'pending');
@@ -254,8 +308,36 @@ function currentDesignInputs() {
     trimDepthMm: Number($('margin').value),
     envelopeExpansionMm: Number($('wall').value),
     cuspAmplitude: Number($('anatomy').value),
-    designSource: $('design-source').value
+    designSource: $('design-source').value,
+    designBrief: {
+      toothId: $('brief-tooth-id')?.value.trim() || '',
+      dentition: $('brief-dentition')?.value || 'permanent',
+      arch: $('brief-arch')?.value || 'maxillary',
+      restorationType: $('brief-restoration-type')?.value || 'single-crown',
+      anatomyReference: $('brief-reference')?.value || 'procedural'
+    }
   };
+}
+function validateDesignBrief(requireTooth = false) {
+  const toothId = $('brief-tooth-id')?.value.trim() || '';
+  const dentition = $('brief-dentition')?.value || 'permanent';
+  if ($('brief-restoration-type')?.value === 'abutment-review') return 'Abutment design is currently a brief-only, non-manufacturing path. Select single crown preview for geometry generation.';
+  if (!toothId && !requireTooth) return null;
+  if (!/^\d{2}$/.test(toothId)) return 'Enter a two-digit FDI tooth designation, or leave it unassigned for a geometry preview.';
+  const value = Number(toothId);
+  const validPermanent = (value >= 11 && value <= 18) || (value >= 21 && value <= 28) || (value >= 31 && value <= 38) || (value >= 41 && value <= 48);
+  const validPrimary = (value >= 51 && value <= 55) || (value >= 61 && value <= 65) || (value >= 71 && value <= 75) || (value >= 81 && value <= 85);
+  if ((dentition === 'permanent' && !validPermanent) || (dentition === 'primary' && !validPrimary)) return 'The tooth number does not match the selected dentition.';
+  return null;
+}
+function validateNumericInputs() {
+  for (const id of ['clearance', 'margin', 'wall', 'anatomy', 'opp-x', 'opp-y', 'opp-z', 'opp-rx', 'opp-ry', 'opp-rz']) {
+    const input = $(id);
+    const value = Number(input.value);
+    if (!Number.isFinite(value)) return input.id + ' must be a finite number.';
+    if (input.min !== '' && value < Number(input.min) || input.max !== '' && value > Number(input.max)) return input.id + ' is outside its allowed range.';
+  }
+  return null;
 }
 function designIsStale() {
   return Boolean(designMesh) && (!designSnapshot || JSON.stringify(currentDesignInputs()) !== JSON.stringify(designSnapshot));
@@ -265,6 +347,7 @@ function refreshDesignFreshness() {
   const stale = designIsStale();
   if (stale) {
     $('review-confirm').checked = false;
+    if (approvalRecord) clearApprovalState();
     setQc('qc-fit', 'Inputs changed · regenerate', 'warn');
     setDesignStatus('Preview stale · regenerate before review', '!');
   } else {
@@ -274,6 +357,7 @@ function refreshDesignFreshness() {
   const canExport = lastDesignClosed && !stale && $('review-confirm').checked;
   $('export-button').disabled = !canExport;
   $('export-button-side').disabled = !canExport;
+  updateApprovalUI();
 }
 function updateCaseInputStatus() {
   const present = (id, value) => {
@@ -290,10 +374,11 @@ function updateCaseInputStatus() {
     : 'No reference crown is loaded. The procedural fallback is a generic research shell.';
   if (!reference && $('design-source').value === 'reference') $('design-source').value = 'procedural';
   const training = isLegacyTrainingCase();
-  $('restoration-tooth-badge').textContent = training ? '3' : '—';
-  $('restoration-tooth-label').textContent = training ? 'Training tooth #3' : 'Tooth not assigned';
-  $('restoration-sub-label').textContent = training ? 'Practice case · crown preview' : 'Single crown preview';
-  $('tooth-label').textContent = training ? 'Training label #3' : 'Not assigned';
+  const toothId = $('brief-tooth-id')?.value.trim();
+  $('tooth-label').textContent = training ? 'Training label #3' : toothId ? 'FDI ' + toothId : 'Not assigned';
+  $('restoration-tooth-badge').textContent = training ? '3' : toothId || '—';
+  $('restoration-tooth-label').textContent = training ? 'Training tooth #3' : toothId ? 'FDI tooth ' + toothId : 'Tooth not assigned';
+  $('restoration-sub-label').textContent = $('brief-restoration-type')?.value === 'abutment-review' ? 'Abutment review · non-manufacturing' : training ? 'Practice case · crown preview' : 'Single crown preview';
 }
 
 function signedVolume(geometry) {
@@ -680,6 +765,15 @@ async function generateProposal() {
     notify('Load a preparation mesh first.');
     return;
   }
+  if (prep.userData.geometryType !== 'surface-mesh') {
+    notify('The preparation must be a surface mesh. Point clouds are accepted for inspection and registration preparation, not Boolean generation.', 4500);
+    return;
+  }
+  const inputError = validateDesignBrief(false) || validateNumericInputs();
+  if (inputError) {
+    notify(inputError, 4200);
+    return;
+  }
   const requestCaseId = caseData?.id;
   const requestInputs = JSON.stringify(currentDesignInputs());
   const requestToken = ++generationToken;
@@ -715,6 +809,7 @@ async function generateProposal() {
     let sourceMode = $('design-source').value;
     const reference = getReferenceMesh();
     if (sourceMode === 'reference' && !reference) throw new Error('Choose a procedural fallback or load a closed reference crown first.');
+    if (sourceMode === 'reference' && reference?.userData.geometryType !== 'surface-mesh') throw new Error('The selected reference must be a surface mesh. Choose the procedural fallback for a point-cloud reference.');
     if (sourceMode === 'reference') {
       reference.updateMatrixWorld(true);
       referenceLocalGeometry = reference.geometry.clone();
@@ -768,6 +863,8 @@ async function generateProposal() {
     designMesh.userData.role = 'crown';
     designMesh.userData.outerGeometry = outer;
     scene.add(designMesh);
+    savedDesignHash = null;
+    clearApprovalState();
     designSnapshot = JSON.parse(requestInputs);
     lastDesignClosed = meshCheck.closed;
     if (!isIsolated) {
@@ -786,6 +883,7 @@ async function generateProposal() {
     $('export-button').disabled = !canExport || !$('review-confirm').checked;
     $('export-button-side').disabled = !canExport || !$('review-confirm').checked;
     setDesignStatus(meshCheck.closed ? (sourceMode === 'reference' ? 'Reference-guided preview · fit NOT EVALUATED' : sourceMode === 'procedural-fallback' ? 'Closed fallback preview · reference open' : 'Procedural preview · fit NOT EVALUATED') : 'Preview generated · mesh closure failed', '!');
+    updateApprovalUI();
     fitCamera(designMesh);
     updateSceneCount();
     if (meshCheck.closed) notify('3D crown proposal generated. Review all surfaces before use.');
@@ -877,6 +975,7 @@ async function saveCase(allowImport = false) {
       const savedMesh = await meshResponse.json();
       if (!meshResponse.ok) throw new Error(savedMesh.error || 'Proposal mesh save failed.');
       generatedMeshRecord = { ...savedMesh, bounds: meshBounds(designMesh.geometry) };
+      savedDesignHash = savedMesh.sha256;
     }
     const response = await fetch('/api/design/' + encodeURIComponent(caseData.id), {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(serializeDesign(generatedMeshRecord))
@@ -921,6 +1020,10 @@ async function restoreSavedCase() {
   for (const [id, value] of [['clearance', saved.internalReliefMm], ['margin', saved.finishLineTrimDepthMm], ['wall', saved.axialWallInputMm], ['anatomy', saved.anatomy]]) {
     if (Number.isFinite(value)) $(id).value = String(value);
   }
+  const brief = saved.currentDesignInputs?.designBrief || {};
+  for (const [id, value] of [['brief-tooth-id', brief.toothId], ['brief-dentition', brief.dentition], ['brief-arch', brief.arch], ['brief-restoration-type', brief.restorationType], ['brief-reference', brief.anatomyReference]]) {
+    if (value != null && $(id)) $(id).value = String(value);
+  }
   if (saved.currentDesignInputs?.designSource && ['reference', 'procedural'].includes(saved.currentDesignInputs.designSource)) $('design-source').value = saved.currentDesignInputs.designSource;
   const translation = saved.opposingTransform?.translationMm || [0, 0, 0];
   const rotation = saved.opposingTransform?.rotationDegrees || [0, 0, 0];
@@ -930,6 +1033,7 @@ async function restoreSavedCase() {
   applyOpposingTransform();
   updateRangeLabels();
   const generated = saved.generatedMesh;
+  savedDesignHash = generated?.sha256 || null;
   const legacyMeshUrl = '/api/design/' + caseData.id + '/mesh';
   const hashedMeshUrl = legacyMeshUrl + '?sha256=' + generated?.sha256;
   if (generated?.sha256 && [legacyMeshUrl, hashedMeshUrl].includes(generated.url)) {
@@ -962,7 +1066,106 @@ async function restoreSavedCase() {
   }
   updateMeshList();
   if (designMesh) fitCamera(designMesh);
+  await restoreApproval();
+  updateApprovalUI();
   return true;
+}
+async function restoreApproval() {
+  approvalRecord = null;
+  if (!savedDesignHash || !caseData) return;
+  const response = await fetch('/api/design/' + encodeURIComponent(caseData.id) + '/approval');
+  if (response.status === 404) return;
+  if (!response.ok) throw new Error('Could not read the saved approval record.');
+  const value = await response.json();
+  if (value.approved === true && value.designFingerprint === savedDesignHash && !designIsStale()) approvalRecord = value;
+}
+function openApprovalDialog() {
+  if (!designMesh || !lastDesignClosed || designIsStale()) return notify('Generate and save a fresh closed proposal before requesting approval.', 4200);
+  $('approval-dialog').showModal();
+}
+async function submitApproval() {
+  if (!designMesh || !lastDesignClosed || designIsStale()) return notify('Approval is blocked until the proposal is fresh and closed.', 4200);
+  if (!$('review-confirm').checked) return notify('Complete the professional review acknowledgement first.', 4200);
+  const briefError = validateDesignBrief(true);
+  if (briefError) return notify(briefError, 4200);
+  const reviewerName = $('reviewer-name').value.trim();
+  const approvalId = $('approval-id').value.trim();
+  if (!reviewerName || !approvalId) return notify('Reviewer name and approval ID are required.', 4200);
+  if (!savedDesignHash && !(await saveCase())) return;
+  const body = {
+    approved: true,
+    reviewerName,
+    reviewerRole: $('reviewer-role').value,
+    approvalId,
+    note: $('approval-note').value.trim(),
+    designFingerprint: savedDesignHash,
+    reviewedAt: new Date().toISOString()
+  };
+  const response = await fetch('/api/design/' + encodeURIComponent(caseData.id) + '/approval', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const result = await response.json();
+  if (!response.ok) return notify(result.error || 'Approval could not be saved.', 4500);
+  approvalRecord = result.approval;
+  updateApprovalUI();
+  notify('Approval recorded. CAM handoff remains profile-gated.');
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+function exportObjText(object) {
+  const geometry = object.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index?.array;
+  const lines = ['# OpenCusp review/CAM handoff OBJ', 'o OpenCuspProposal'];
+  const point = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld);
+    lines.push('v ' + point.x + ' ' + point.y + ' ' + point.z);
+  }
+  const triangles = index ? index.length / 3 : position.count / 3;
+  for (let i = 0; i < triangles; i++) {
+    const a = index ? index[i * 3] + 1 : i * 3 + 1;
+    const b = index ? index[i * 3 + 1] + 1 : i * 3 + 2;
+    const c = index ? index[i * 3 + 2] + 1 : i * 3 + 3;
+    lines.push('f ' + a + ' ' + b + ' ' + c);
+  }
+  return lines.join('\n') + '\n';
+}
+async function exportCamHandoff() {
+  if (!approvalRecord || !savedDesignHash || !designMesh || designIsStale()) return notify('CAM handoff is blocked until the current proposal has matching approval.', 4500);
+  const format = $('cam-format').value;
+  const profile = $('cam-machine-profile').value;
+  const camVersion = $('cam-version').value.trim();
+  const material = $('cam-material').value;
+  const blank = $('cam-blank').value.trim();
+  const toolProfile = $('cam-tool-profile').value.trim();
+  if (!profile || !camVersion || !material || !blank || !toolProfile) return notify('Complete the CAM machine, version, material, blank, and tool profile fields.', 4500);
+  const response = await fetch('/api/design/' + encodeURIComponent(caseData.id) + '/cam-handoff', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      format, machineProfile: profile, camVersion, material, blank, toolProfile,
+      designFingerprint: savedDesignHash,
+      sourceFormats: meshes.map((mesh) => fileExtension(mesh.userData.url)),
+      restorationType: currentDesignInputs().designBrief.restorationType
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) return notify(result.error || 'CAM handoff was rejected.', 4500);
+  const filename = result.manifest.geometry.fileName;
+  if (format === 'obj') {
+    downloadBlob(new Blob([exportObjText(designMesh)], { type: 'text/plain' }), filename);
+  } else {
+    const output = new STLExporter().parse(designMesh, { binary: true });
+    downloadBlob(new Blob([output], { type: 'model/stl' }), filename);
+  }
+  downloadBlob(new Blob([JSON.stringify(result.manifest, null, 2)], { type: 'application/json' }), result.manifest.manifestFileName);
+  $('cam-handoff-status').textContent = 'Handoff saved locally · operator must import and simulate it in the selected CAM system.';
+  notify('CAM handoff exported with approval manifest. No machine was contacted.');
 }
 function exportReviewStl() {
   if (isBusy || isImporting || isSwitchingCase) return notify('Wait for the current case operation to finish.');
@@ -1101,7 +1304,7 @@ async function readCase(id) {
   const saved = await response.json();
   if (saved.schemaVersion !== 1 || saved.caseId !== id || !Array.isArray(saved.sources)) throw new Error('The saved case manifest is incomplete or unsupported.');
   const files = saved.sources.map((source) => {
-    if (!/^\/user-meshes\/[a-z0-9_-]+\.(stl|ply)$/i.test(source.url || '') || !/^[a-f0-9]{64}$/i.test(source.sha256 || '')) {
+    if (!/^\/user-meshes\/[a-z0-9_-]+\.(stl|ply|obj|off|xyz|pts|csv|pcd)$/i.test(source.url || '') || !/^[a-f0-9]{64}$/i.test(source.sha256 || '')) {
       throw new Error('A saved imported scan has an invalid path or checksum.');
     }
     return source;
@@ -1221,11 +1424,28 @@ function clearCurrentCaseScene() {
   $('wall').value = '1';
   $('anatomy').value = '55';
   $('design-source').value = 'procedural';
+  $('brief-tooth-id').value = '';
+  $('brief-dentition').value = 'permanent';
+  $('brief-arch').value = 'maxillary';
+  $('brief-restoration-type').value = 'single-crown';
+  $('brief-reference').value = 'procedural';
   ['opp-x','opp-y','opp-z','opp-rx','opp-ry','opp-rz'].forEach((id) => { $(id).value = '0'; });
   lastOcclusionGap = null;
   updateRangeLabels();
   updateBiteSummary();
   updateMeshList();
+}
+
+function navigateTo(target) {
+  const targets = { case: $('case-picker'), design: $('design-brief'), review: $('review-section') };
+  if (target === 'settings') {
+    $('settings-dialog').showModal();
+  } else if (targets[target]) {
+    targets[target].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  document.querySelectorAll('[data-nav-target]').forEach((button) => {
+    button.toggleAttribute('aria-current', button.dataset.navTarget === target && target !== 'settings');
+  });
 }
 
 $('generate-button').addEventListener('click', generateProposal);
@@ -1236,6 +1456,7 @@ $('export-button').addEventListener('click', exportReviewStl);
 $('export-button-side').addEventListener('click', exportReviewStl);
 $('review-confirm').addEventListener('change', () => {
   refreshDesignFreshness();
+  updateApprovalUI();
 });
 $('clearance').addEventListener('input', updateRangeLabels);
 $('margin').addEventListener('input', updateRangeLabels);
@@ -1243,6 +1464,10 @@ $('wall').addEventListener('input', updateRangeLabels);
 $('anatomy').addEventListener('input', updateRangeLabels);
 $('design-source').addEventListener('change', () => { if (designMesh) refreshDesignFreshness(); updateCaseInputStatus(); });
 ['opp-x','opp-y','opp-z','opp-rx','opp-ry','opp-rz'].forEach((id) => $(id).addEventListener('input', applyOpposingTransform));
+['brief-tooth-id', 'brief-dentition', 'brief-arch', 'brief-restoration-type', 'brief-reference'].forEach((id) => {
+  $(id).addEventListener('input', () => { updateCaseInputStatus(); if (designMesh) refreshDesignFreshness(); });
+  $(id).addEventListener('change', () => { updateCaseInputStatus(); if (designMesh) refreshDesignFreshness(); });
+});
 $('bite-verified').addEventListener('change', updateBiteSummary);
 $('bite-reset').addEventListener('click', () => { ['opp-x','opp-y','opp-z','opp-rx','opp-ry','opp-rz'].forEach((id) => { $(id).value = '0'; }); $('bite-verified').checked = false; applyOpposingTransform(); });
 $('import-button').addEventListener('click', () => $('file-input').click());
@@ -1260,7 +1485,13 @@ $('isolate-button').addEventListener('click', () => {
   updateMeshList();
   fitCamera(isIsolated ? (designMesh || getPrepMesh()) : null);
 });
-$('add-restoration').addEventListener('click', () => notify('This prototype is scoped to one crown; multi-unit bridge design is a later module.'));
+$('add-restoration').addEventListener('click', () => { navigateTo('design'); $('brief-tooth-id').focus(); notify('Design brief opened.'); });
+$('approval-button').addEventListener('click', openApprovalDialog);
+$('approval-dialog').addEventListener('close', () => {
+  if ($('approval-dialog').returnValue === 'approve') submitApproval().catch((error) => { console.error(error); notify('Approval could not be recorded.', 4500); });
+});
+$('cam-handoff-button').addEventListener('click', () => exportCamHandoff().catch((error) => { console.error(error); notify('CAM handoff could not be created.', 4500); }));
+document.querySelectorAll('[data-nav-target]').forEach((button) => button.addEventListener('click', () => navigateTo(button.dataset.navTarget)));
 document.querySelectorAll('.view-tab').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.view-tab').forEach((b) => b.classList.remove('active'));
   button.classList.add('active');
