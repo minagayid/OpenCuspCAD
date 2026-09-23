@@ -1,8 +1,9 @@
 # OpenCusp Dental CAD
 
-OpenCusp is a local-first dental-geometry demonstrator. It imports STL/PLY
-case scans, displays them in 3D, creates a generic single-crown Boolean preview,
-records scan provenance, and saves review-only geometry locally.
+OpenCusp is a local-first dental-geometry demonstrator. It imports common
+surface meshes and point clouds, displays them in 3D, creates a generic
+single-crown Boolean preview from supported surface inputs, records scan
+provenance, and saves review-only geometry locally.
 
 The public repository ships an original synthetic box fixture so a fresh clone
 has a deterministic demo without patient data or an unlicensed scan dataset.
@@ -48,14 +49,19 @@ GitHub Actions runs the same test and build checks for pushes and pull requests.
 
 ## What the demo does
 
-- imports STL and PLY meshes with declared source units;
+- imports STL, PLY, OBJ, and OFF surface meshes plus XYZ, PTS, CSV, and ASCII PCD point clouds with declared source units;
 - checks mesh topology and non-finite coordinates;
 - previews a single crown shell with a preparation-derived cavity;
 - stores local case manifests, SHA-256 provenance, and generated review STL;
-- keeps export behind a professional-review acknowledgement.
+- keeps review export behind an acknowledgement and gates the local CAM handoff behind a fingerprinted approval record and operator-entered CAM profile;
+- provides local Markdown skills for input data, professional dental design, anatomy references, and CAM approval.
 
 The workflow is intentionally bounded. A closed mesh does not prove margin fit,
 wall thickness, occlusion, material suitability, or millability.
+
+Point clouds are view-only until they are separately reconstructed and quality-
+checked. The CAM handoff creates a local STL/OBJ plus manifest for operator
+import and simulation; it does not contact a machine or generate a toolpath.
 
 ## Data and privacy
 
