@@ -1,6 +1,6 @@
 # Dental CAD/CAM research and critic committee
 
-Research snapshot: 16 September 2026. This document records public product documentation, peer-reviewed or open research, limitations of public datasets, and an AI critic review of OpenCusp. Product names identify workflow references only. Nothing here grants access to proprietary code, libraries, case data, or machine profiles.
+Research snapshot: 16 September 2026. This document records public product documentation, peer-reviewed or open research, limitations of public datasets, and an AI critic review of procad. Product names identify workflow references only. Nothing here grants access to proprietary code, libraries, case data, or machine profiles.
 
 ## What the public products actually expose
 
@@ -16,7 +16,7 @@ CAM is a separate production stage. exocad documentation describes blanks, nesti
 
 ### BlueSkyPlan
 
-BlueSkyPlan’s public manual indexes a crown-and-bridge module, virtual teeth, restoration panels, bridge-part editing, denture workflows, and data export [11]. The vendor’s parts pages describe component catalogs as STL geometry plus structured measurement spreadsheets; implant/abutment part orientation, dimensions, compatibility and scan-body definitions are explicit data, not just a decorative library [13,14]. These are manufacturer/vendor integration mechanisms, not open libraries that OpenCusp can redistribute.
+BlueSkyPlan’s public manual indexes a crown-and-bridge module, virtual teeth, restoration panels, bridge-part editing, denture workflows, and data export [11]. The vendor’s parts pages describe component catalogs as STL geometry plus structured measurement spreadsheets; implant/abutment part orientation, dimensions, compatibility and scan-body definitions are explicit data, not just a decorative library [13,14]. These are manufacturer/vendor integration mechanisms, not open libraries that procad can redistribute.
 
 The vendor’s current version 4.13 update page advertises AI tooth design and specifically calls out permanent titanium-base crowns and bridges with design/export at no charge [12]. Its general exports page separately says that designed STL exports consume credits in most modules, while imported/edit-only data can be exported without a fee [15]. These statements are scoped and version-dependent; “BlueSkyPlan is free” does not mean every designed output, add-on, component, or CAM operation is free. No installer was run, account was created, terms were accepted, credit was used, or purchase was made during this project.
 
@@ -28,7 +28,7 @@ The practical implication is that a language model can help route a case, explai
 
 ## Restoration coverage: separate jobs, separate evidence
 
-| Restoration / case | Required design evidence and machinery | OpenCusp status |
+| Restoration / case | Required design evidence and machinery | procad status |
 |---|---|---|
 | Single full-coverage crown | Tooth/dentition/side identity; scan quality; approved 3D finish line; insertion path and undercuts; zoned intaglio; patient-specific proximal and static occlusal adaptation; material thickness; specific validated CAM | A single-crown **geometry demonstration only**. Current output is a bounding-box shell with generic cusp perturbations and a Boolean prep subtraction. It is not anatomically targeted, does not trace a margin or measure fit, and is not ready to mill. |
 | Coping / framework | Reduction/cutback design, material-specific framework design, connector geometry, support and CAM constraints | Not implemented |
@@ -46,7 +46,7 @@ The committee rejects any claim that six-degree manual movement or a checkbox re
 
 Mesh closure, signed volume, Boolean success and a saved checksum are software/geometry properties, not clinical fit. A BlueSky CAD comparison study manufactured crowns and measured them with a triple-scan protocol; CAD program selection changed measured marginal fit [18]. Fit method itself affects results, and published acceptance cutoffs vary; do not encode one universal cement-gap or wall-thickness limit [19]. Validate the physical restoration against the die and design using an independent method (for example, triple-scan, replica or micro-CT), and tie limits to the indication, material instructions, manufacturing process and validation protocol.
 
-“Ready to mill” requires more than a closed STL: named material and blank, machine, stock and fixture coordinate frames, permitted axes, tool library and minimum tool geometry, collision/undercut treatment, compensation, supported file contract/postprocessor, simulated path, and a validated machine/material recipe. A review-only STL is not a CAM file. No OpenCusp component is a validated toolpath, machine driver or release gate for manufacturing.
+“Ready to mill” requires more than a closed STL: named material and blank, machine, stock and fixture coordinate frames, permitted axes, tool library and minimum tool geometry, collision/undercut treatment, compensation, supported file contract/postprocessor, simulated path, and a validated machine/material recipe. A review-only STL is not a CAM file. No procad component is a validated toolpath, machine driver or release gate for manufacturing.
 
 ## Critic committee: adversarial findings and resolved decisions
 

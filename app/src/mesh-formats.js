@@ -4,6 +4,15 @@ const FLOAT32_MAX = 3.4028234663852886e38;
 export const SURFACE_EXTENSIONS = Object.freeze(['.stl', '.ply', '.obj', '.off']);
 export const POINT_CLOUD_EXTENSIONS = Object.freeze(['.xyz', '.pts', '.csv', '.pcd']);
 export const ACCEPTED_EXTENSIONS = Object.freeze([...SURFACE_EXTENSIONS, ...POINT_CLOUD_EXTENSIONS]);
+export const MAX_TEXT_MESH_CHARACTERS = 16 * 1024 * 1024;
+const MAX_PARSED_POINTS = 1_000_000;
+const MAX_PARSED_TRIANGLES = 1_000_000;
+
+function boundedText(text) {
+  const source = String(text);
+  if (source.length > MAX_TEXT_MESH_CHARACTERS) throw new Error('Text scan exceeds the 16 MiB local parsing limit.');
+  return source;
+}
 
 function cleanLines(text) {
   return String(text).split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
@@ -18,19 +27,22 @@ function resolveObjIndex(value, vertexCount) {
 }
 
 export function parseObjText(text) {
+  const source = boundedText(text);
   const positions = [];
   const indices = [];
-  for (const line of String(text).split(/\r?\n/)) {
+  for (const line of source.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const fields = trimmed.split(/\s+/);
     if (fields[0] === 'v') {
+      if (positions.length / 3 >= MAX_PARSED_POINTS) throw new Error('OBJ exceeds the 1,000,000 point parsing limit.');
       if (fields.length < 4) throw new Error('OBJ vertex is missing a coordinate.');
       const values = fields.slice(1, 4).map(Number);
       if (!values.every(finite)) throw new Error('OBJ contains a non-finite vertex coordinate.');
       positions.push(...values);
     } else if (fields[0] === 'f') {
       if (fields.length < 4) throw new Error('OBJ face has fewer than three vertices.');
+      if (fields.length - 3 > MAX_PARSED_TRIANGLES - indices.length / 3) throw new Error('OBJ exceeds the 1,000,000 triangle parsing limit.');
       const face = fields.slice(1).map((field) => resolveObjIndex(field.split('/')[0], positions.length / 3));
       for (let i = 1; i < face.length - 1; i++) indices.push(face[0], face[i], face[i + 1]);
     }
@@ -40,7 +52,7 @@ export function parseObjText(text) {
 }
 
 export function parseOffText(text) {
-  const lines = cleanLines(text);
+  const lines = cleanLines(boundedText(text));
   if (lines[0]?.toUpperCase() !== 'OFF') throw new Error('OFF file must begin with OFF.');
   const counts = lines[1]?.split(/\s+/).map(Number) || [];
   if (counts.length < 2 || !Number.isInteger(counts[0]) || !Number.isInteger(counts[1]) || counts[0] < 3 || counts[1] < 1) {
@@ -48,6 +60,7 @@ export function parseOffText(text) {
   }
   const vertexCount = counts[0];
   const faceCount = counts[1];
+  if (vertexCount > MAX_PARSED_POINTS || faceCount > MAX_PARSED_TRIANGLES) throw new Error('OFF exceeds local point or face parsing limits.');
   const positions = [];
   for (let i = 0; i < vertexCount; i++) {
     const values = lines[2 + i]?.split(/\s+/).slice(0, 3).map(Number) || [];
@@ -59,6 +72,7 @@ export function parseOffText(text) {
     const fields = lines[2 + vertexCount + i]?.split(/\s+/).map(Number) || [];
     const size = fields[0];
     if (!Number.isInteger(size) || size < 3 || fields.length < size + 1) throw new Error('OFF contains an invalid face.');
+    if (size - 2 > MAX_PARSED_TRIANGLES - indices.length / 3) throw new Error('OFF exceeds the 1,000,000 triangle parsing limit.');
     const face = fields.slice(1, size + 1);
     if (!face.every((index) => Number.isInteger(index) && index >= 0 && index < vertexCount)) throw new Error('OFF face references a missing vertex.');
     for (let j = 1; j < face.length - 1; j++) indices.push(face[0], face[j], face[j + 1]);
@@ -73,7 +87,7 @@ function pointFromFields(fields, indexes = [0, 1, 2]) {
 }
 
 export function parsePointCloudText(text, extension = '.xyz') {
-  const rawLines = String(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rawLines = boundedText(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let lines = rawLines.filter((line) => !line.startsWith('#'));
   if (extension === '.pcd') {
     const dataIndex = lines.findIndex((line) => /^data\s+ascii$/i.test(line));
@@ -88,12 +102,16 @@ export function parsePointCloudText(text, extension = '.xyz') {
       if (values.length <= Math.max(x, y, z)) continue;
       const point = [values[x], values[y], values[z]];
       if (!point.every(finite)) throw new Error('PCD contains a non-finite point.');
+      if (positions.length / 3 >= MAX_PARSED_POINTS) throw new Error('PCD exceeds the 1,000,000 point parsing limit.');
       positions.push(...point);
     }
     if (positions.length < 9) throw new Error('Point cloud contains fewer than three points.');
     return { geometryType: 'point-cloud', positions, indices: [] };
   }
-  if (extension === '.pts' && lines[0] && /^\d+$/.test(lines[0])) lines = lines.slice(1);
+  if (extension === '.pts' && lines[0] && /^\d+$/.test(lines[0])) {
+    if (Number(lines[0]) > MAX_PARSED_POINTS) throw new Error('PTS exceeds the 1,000,000 point parsing limit.');
+    lines = lines.slice(1);
+  }
   let indexes = [0, 1, 2];
   if (extension === '.csv' && lines[0]) {
     const header = lines[0].split(/[\s,;]+/).map((field) => field.toLowerCase());
@@ -107,13 +125,17 @@ export function parsePointCloudText(text, extension = '.xyz') {
   for (const line of lines) {
     const point = pointFromFields(line.split(/[\s,;]+/), indexes);
     if (extension === '.csv' && !point) throw new Error('CSV contains an invalid or incomplete XYZ row.');
-    if (point) positions.push(...point);
+    if (point) {
+      if (positions.length / 3 >= MAX_PARSED_POINTS) throw new Error('Point cloud exceeds the 1,000,000 point parsing limit.');
+      positions.push(...point);
+    }
   }
   if (positions.length < 9) throw new Error('Point cloud contains fewer than three numeric XYZ points.');
   return { geometryType: 'point-cloud', positions, indices: [] };
 }
 
 export function parseMeshText(text, extension) {
+  boundedText(text);
   const ext = String(extension).toLowerCase();
   if (ext === '.obj') return parseObjText(text);
   if (ext === '.off') return parseOffText(text);

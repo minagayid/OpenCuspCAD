@@ -1,13 +1,13 @@
-# OpenCusp CAD architecture
+# procad CAD architecture
 
-OpenCusp is a local desktop wrapper around a loopback web application. The renderer owns the interactive 3D scene and review controls. The local service owns file intake, SHA-256 provenance, case JSON, approval records, and review-proposal persistence. Surface meshes are accepted in STL/PLY/OBJ/OFF; point clouds are accepted in XYZ/PTS/CSV/ASCII PCD for inspection and registration preparation. A packaged Electron process chooses a free loopback port, starts the service as a child process, waits for `/api/health`, and then opens the same UI used in development.
+procad is a local desktop wrapper around a loopback web application. The renderer owns the interactive 3D scene and review controls. The local service owns file intake, SHA-256 provenance, case JSON, approval records, and review-proposal persistence. Surface meshes are accepted in STL/PLY/OBJ/OFF; point clouds are accepted in XYZ/PTS/CSV/ASCII PCD for inspection and registration preparation. A packaged Electron process chooses a free loopback port, starts the service as a child process, waits for `/api/health`, and then opens the same UI used in development.
 
 ```mermaid
 flowchart LR
   UI[Electron window / browser UI] -->|loopback HTTP| API[Express local service]
   UI --> GEO[Three.js + Manifold WASM]
   API --> SCANS[data/demo or user-provided local scans]
-  API --> USER[%APPDATA%/OpenCusp CAD/data]
+  API --> USER[%APPDATA%/procad CAD/data]
   GEO --> STL[review STL or OBJ handoff]
 ```
 

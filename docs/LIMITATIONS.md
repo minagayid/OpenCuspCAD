@@ -10,4 +10,4 @@ The preparation cavity is a geometry preview. The displayed relief value is an i
 
 The review STL and the local STL/OBJ CAM handoff package are intentionally gated and carry a warning. The local reviewer record is self-attested and is not an authenticated professional credential or clinical approval. A qualified dental professional and authorized CAM operator must validate scan identity, registration, margin, intaglio, contacts, occlusion, material, units, blank, tools, simulation, and machine settings in a validated workflow before any clinical or manufacturing use. The app never contacts a CAM machine or generates a toolpath.
 
-The attached build prompt was treated as an engineering reference for an original system. OpenCusp does not include Exocad or BlueSky proprietary code, protected tooth libraries, license keys, or proprietary CAM components.
+The attached build prompt was treated as an engineering reference for an original system. procad does not include Exocad or BlueSky proprietary code, protected tooth libraries, license keys, or proprietary CAM components.
