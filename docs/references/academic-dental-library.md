@@ -1,6 +1,6 @@
 # Academic dental and scan-format library
 
-The links below were selected as study references for the local design skills. OpenCuspCAD summarizes concepts and links to the source; it does not copy textbook chapters or redistribute source images.
+The links below were selected as study references for the local design skills. procad summarizes concepts and links to the source; it does not copy textbook chapters or redistribute source images.
 
 ## Anatomy and morphology
 

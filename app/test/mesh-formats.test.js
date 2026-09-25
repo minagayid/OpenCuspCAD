@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMeshText, validateParsedGeometry } from '../src/mesh-formats.js';
+import { MAX_TEXT_MESH_CHARACTERS, parseMeshText, validateParsedGeometry } from '../src/mesh-formats.js';
 
 test('parses OBJ polygons and triangulates them', () => {
   const parsed = parseMeshText('v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n', '.obj');
@@ -36,4 +36,8 @@ test('maps reordered CSV XYZ columns from a header', () => {
   const parsed = parseMeshText('id,z,x,y\na,0,0,0\nb,0,1,0\nc,0,0,1\n', '.csv');
   assert.deepEqual(parsed.positions, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
   assert.throws(() => parseMeshText('x,y,z\n0,0\n1,0,0\n0,1,0\n', '.csv'), /invalid or incomplete/);
+});
+
+test('rejects oversized text scans before parsing their rows', () => {
+  assert.throws(() => parseMeshText('x'.repeat(MAX_TEXT_MESH_CHARACTERS + 1), '.xyz'), /16 MiB local parsing limit/);
 });

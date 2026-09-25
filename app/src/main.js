@@ -15,7 +15,9 @@ import './case-ui.css';
 import './import-ui.css';
 
 const $ = (id) => document.getElementById(id);
-const BUILT_IN_DEMO_IDS = new Set(['bluesky-practice-3', 'opencusp-public-demo']);
+const BUILT_IN_DEMO_IDS = new Set(['bluesky-practice-3', 'procad-public-demo']);
+const ACTIVE_CASE_STORAGE_KEY = 'procad-active-case-id';
+const LEGACY_ACTIVE_CASE_STORAGE_KEY = 'opencusp-active-case-id';
 function isBuiltInDemoId(id = caseData?.id) { return BUILT_IN_DEMO_IDS.has(id); }
 function isLegacyTrainingCase(id = caseData?.id) { return id === 'bluesky-practice-3'; }
 const viewport = $('viewport');
@@ -312,7 +314,7 @@ function currentDesignInputs() {
   const opposing = getOpposingMesh();
   const reference = getReferenceMesh();
   return {
-    geometryEngine: 'opencusp-boolean-preview-v1',
+    geometryEngine: 'procad-boolean-preview-v1',
     prep: prep ? {
       url: prep.userData.url,
       sha256: prep.userData.sha256,
@@ -931,7 +933,7 @@ async function generateProposal() {
     const mat = materialFor(roleColors.crown, 1);
     mat.side = THREE.DoubleSide;
     designMesh = new THREE.Mesh(designGeometry, mat);
-    designMesh.name = 'OpenCusp crown proposal with intaglio';
+    designMesh.name = 'procad crown proposal with intaglio';
     designMesh.userData.role = 'crown';
     designMesh.userData.outerGeometry = outer;
     scene.add(designMesh);
@@ -996,7 +998,7 @@ function serializeDesign(generatedMesh = null) {
     bounds: meshBounds(mesh.geometry)
   }));
   return {
-    product: 'OpenCusp Dental CAD',
+    product: 'procad Dental CAD',
     version: '0.1.0',
     schemaVersion: 1,
     unit: 'mm',
@@ -1056,7 +1058,7 @@ async function saveCase(allowImport = false) {
     });
     const savedCase = await response.json();
     if (!response.ok) throw new Error(savedCase.error || 'Save request failed.');
-    localStorage.setItem('opencusp-active-case-id', caseData.id);
+    localStorage.setItem(ACTIVE_CASE_STORAGE_KEY, caseData.id);
     notify(designMesh ? 'Case and proposal mesh saved locally.' : 'Case settings saved locally.');
     return true;
   } catch (error) {
@@ -1121,7 +1123,7 @@ async function restoreSavedCase() {
     const pos = geometry.attributes.position.array;
     if (![...pos].every(Number.isFinite)) throw new Error('Saved proposal contains invalid coordinates.');
     designMesh = new THREE.Mesh(geometry, materialFor(roleColors.crown, 1));
-    designMesh.name = 'Restored OpenCusp review proposal';
+    designMesh.name = 'Restored procad review proposal';
     designMesh.userData.role = 'crown';
     scene.add(designMesh);
     const check = closureCheck(geometry);
@@ -1199,7 +1201,7 @@ function exportObjText(object) {
   const geometry = object.geometry;
   const position = geometry.attributes.position;
   const index = geometry.index?.array;
-  const lines = ['# OpenCusp review/CAM handoff OBJ', 'o OpenCuspProposal'];
+  const lines = ['# procad review/CAM handoff OBJ', 'o procadProposal'];
   const point = new THREE.Vector3();
   for (let i = 0; i < position.count; i++) {
     point.fromBufferAttribute(position, i).applyMatrix4(object.matrixWorld);
@@ -1278,7 +1280,7 @@ function exportReviewStl() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = isLegacyTrainingCase() ? 'OpenCusp_TrainingCase3_REVIEW_REQUIRED.stl' : 'OpenCusp_Unassigned_REVIEW_REQUIRED.stl';
+  link.download = isLegacyTrainingCase() ? 'procad_TrainingCase3_REVIEW_REQUIRED.stl' : 'procad_Unassigned_REVIEW_REQUIRED.stl';
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
   notify('Review STL downloaded. It is not a machine toolpath.');
@@ -1433,7 +1435,7 @@ async function activateCase(id) {
 async function refreshCasePicker() {
   const picker = $('case-picker');
   if (!picker) return;
-  const options = [{ id: caseData?.id || 'opencusp-public-demo', title: caseData?.title || 'OpenCusp public demo · synthetic mesh' }];
+  const options = [{ id: caseData?.id || 'procad-public-demo', title: caseData?.title || 'procad public demo · synthetic mesh' }];
   try {
     const response = await fetch('/api/cases');
     if (response.ok) {
@@ -1443,7 +1445,7 @@ async function refreshCasePicker() {
   } catch { /* The training case remains available if listing saved cases fails. */ }
   if (caseData && !options.some((item) => item.id === caseData.id)) options.push({ id: caseData.id, title: caseData.title });
   picker.replaceChildren(...options.map((item) => new Option(item.title, item.id)));
-  picker.value = caseData?.id || 'opencusp-public-demo';
+  picker.value = caseData?.id || 'procad-public-demo';
 }
 async function switchCase(id) {
   if (!id || id === caseData?.id) return;
@@ -1456,7 +1458,7 @@ async function switchCase(id) {
   try {
     if (caseData && !(await saveCase())) { $('case-picker').value = previousId; return; }
     await activateCase(id);
-    localStorage.setItem('opencusp-active-case-id', id);
+    localStorage.setItem(ACTIVE_CASE_STORAGE_KEY, id);
     await refreshCasePicker();
     notify('Opened ' + caseData.title + '.');
   } catch (error) {
@@ -1505,8 +1507,14 @@ async function createNewCase() {
 }
 async function start() {
   try {
-    const activeId = localStorage.getItem('opencusp-active-case-id');
-    await activateCase(activeId || 'opencusp-public-demo');
+    const savedActiveId = localStorage.getItem(ACTIVE_CASE_STORAGE_KEY);
+    let activeId = savedActiveId || localStorage.getItem(LEGACY_ACTIVE_CASE_STORAGE_KEY);
+    if (!savedActiveId && activeId) {
+      if (activeId === 'opencusp-public-demo') activeId = 'procad-public-demo';
+      localStorage.setItem(ACTIVE_CASE_STORAGE_KEY, activeId);
+      localStorage.removeItem(LEGACY_ACTIVE_CASE_STORAGE_KEY);
+    }
+    await activateCase(activeId || 'procad-public-demo');
     await refreshCasePicker();
     $('loading').classList.add('hidden');
   } catch (error) {

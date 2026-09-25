@@ -1,6 +1,6 @@
-# OpenCusp Dental CAD
+# procad Dental CAD
 
-OpenCusp is a local-first dental-geometry demonstrator. It imports common
+procad is a local-first dental-geometry demonstrator. It imports common
 surface meshes and point clouds, displays them in 3D, creates a generic
 single-crown Boolean preview from supported surface inputs, records scan
 provenance, and saves review-only geometry locally.
@@ -76,7 +76,7 @@ rights were not established. See [docs/OPEN_SOURCE_NOTICES.md](docs/OPEN_SOURCE_
 
 ## Scope and limitations
 
-OpenCusp is not a medical device, clinical recommendation system, validated
+procad is not a medical device, clinical recommendation system, validated
 dental CAD/CAM product, milling engine, or replacement for professional
 judgment. It does not provide a traced 3D margin, measured intaglio fit,
 validated bite registration, contact map, bridge/implant workflows, material

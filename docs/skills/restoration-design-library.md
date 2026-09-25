@@ -16,7 +16,7 @@ Each record should preserve:
 
 ## Supported routing matrix
 
-| Design class | Required design evidence | Current OpenCusp route |
+| Design class | Required design evidence | Current procad route |
 | --- | --- | --- |
 | Full-contour crown | Tooth identity, visible finish line, insertion path, intaglio, contacts, occlusion, material/CAM review | Generic crown preview only; approval and CAM handoff remain review-gated |
 | Coping / cutback | Margin, reduction prescription, cutback boundary, minimum thickness from the selected material, contacts and occlusion | Brief-only; no geometry generation |
@@ -38,4 +38,4 @@ Every future library asset must include a stable identifier, version, source/lic
 - `BRIEF_ONLY`: prescription and evidence are recorded, but no manufacturing geometry is authorized.
 - `REVIEW_ONLY`: a deterministic preview exists and is fingerprinted, but clinical/CAM checks are incomplete.
 - `CAM_SIMULATION_AND_OPERATOR_CHECK_REQUIRED`: a local STL/OBJ handoff and manifest exist; the operator must import and simulate them.
-- `RELEASED_FOR_MANUFACTURE`: reserved for a future validated machine-specific workflow. OpenCuspCAD does not currently produce this state.
+- `RELEASED_FOR_MANUFACTURE`: reserved for a future validated machine-specific workflow. procad does not currently produce this state.

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const WELD_TOLERANCE_MM = 0.00008;
 
@@ -16,12 +15,28 @@ export function inspectClosedMesh(geometry) {
     }
   }
 
-  const positionOnly = geometry.clone();
-  for (const key of Object.keys(positionOnly.attributes)) {
-    if (key !== 'position') positionOnly.deleteAttribute(key);
+  // Keep server-side validation independent of Three.js' example addons. Those
+  // addons are bundled into the renderer, but are not part of Three's core API.
+  const weldedPositions = [];
+  const weldedIndices = [];
+  const vertexByKey = new Map();
+  const sourceIndices = geometry.index;
+  const sourceIndexCount = sourceIndices?.count ?? source.count;
+  for (let i = 0; i < sourceIndexCount; i++) {
+    const sourceIndex = sourceIndices ? sourceIndices.getX(i) : i;
+    const x = source.getX(sourceIndex), y = source.getY(sourceIndex), z = source.getZ(sourceIndex);
+    const key = `${Math.round(x / WELD_TOLERANCE_MM)}:${Math.round(y / WELD_TOLERANCE_MM)}:${Math.round(z / WELD_TOLERANCE_MM)}`;
+    let weldedIndex = vertexByKey.get(key);
+    if (weldedIndex === undefined) {
+      weldedIndex = weldedPositions.length / 3;
+      vertexByKey.set(key, weldedIndex);
+      weldedPositions.push(x, y, z);
+    }
+    weldedIndices.push(weldedIndex);
   }
-  const welded = mergeVertices(positionOnly, WELD_TOLERANCE_MM);
-  positionOnly.dispose();
+  const welded = new THREE.BufferGeometry();
+  welded.setAttribute('position', new THREE.Float32BufferAttribute(weldedPositions, 3));
+  welded.setIndex(weldedIndices);
   const idx = welded.index;
   if (!idx || idx.count < 3 || idx.count % 3 !== 0) {
     welded.dispose();

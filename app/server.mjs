@@ -6,20 +6,21 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { STLLoader } from './server-loaders/STLLoader.js';
 import { PLYLoader } from './server-loaders/PLYLoader.js';
-import { parseMeshText, validateParsedGeometry } from './src/mesh-formats.js';
+import { MAX_TEXT_MESH_CHARACTERS, parseMeshText, validateParsedGeometry } from './src/mesh-formats.js';
 import { inspectClosedMesh } from './src/mesh-validation.js';
+import { unitToMillimeters } from './src/units.js';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(appDir, '..');
-const resourceRoot = process.env.OPENCUSP_RESOURCE_ROOT || projectDir;
-const dataRoot = process.env.OPENCUSP_DATA_ROOT || path.join(projectDir, 'data');
+const resourceRoot = process.env.PROCAD_RESOURCE_ROOT || projectDir;
+const dataRoot = process.env.PROCAD_DATA_ROOT || path.join(projectDir, 'data');
 const privateSampleDir = path.join(resourceRoot, 'data', 'BlueSky_Crown_Practice');
 const publicSampleDir = path.join(resourceRoot, 'data', 'demo');
-const sampleDir = process.env.OPENCUSP_SAMPLE_DIR || await fs.access(privateSampleDir).then(() => privateSampleDir).catch(() => publicSampleDir);
+const sampleDir = process.env.PROCAD_SAMPLE_DIR || await fs.access(privateSampleDir).then(() => privateSampleDir).catch(() => publicSampleDir);
 const usesLegacySample = path.basename(sampleDir).toLowerCase() === 'bluesky_crown_practice';
-const userDir = process.env.OPENCUSP_USER_DIR || path.join(dataRoot, 'user_meshes');
-const stateDir = process.env.OPENCUSP_STATE_DIR || path.join(dataRoot, 'cases');
-const distDir = process.env.OPENCUSP_DIST_DIR || path.join(appDir, 'dist');
+const userDir = process.env.PROCAD_USER_DIR || path.join(dataRoot, 'user_meshes');
+const stateDir = process.env.PROCAD_STATE_DIR || path.join(dataRoot, 'cases');
+const distDir = process.env.PROCAD_DIST_DIR || path.join(appDir, 'dist');
 const port = Number(process.env.PORT || 4179);
 const app = express();
 const maxTriangles = 1_000_000;
@@ -29,7 +30,7 @@ const defaultOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:5173'
 ];
-const allowedOrigins = new Set((process.env.OPENCUSP_ALLOWED_ORIGINS || defaultOrigins.join(',')).split(',').map((value) => value.trim()).filter(Boolean));
+const allowedOrigins = new Set((process.env.PROCAD_ALLOWED_ORIGINS || defaultOrigins.join(',')).split(',').map((value) => value.trim()).filter(Boolean));
 
 await fs.mkdir(userDir, { recursive: true });
 await fs.mkdir(stateDir, { recursive: true });
@@ -93,6 +94,7 @@ async function validateUploadedMesh(file, unitToMm = 1) {
     return { ...validateGeometry(new PLYLoader().parse(toArrayBuffer(bytes)), { unitToMm }), geometryType: 'surface-mesh' };
   }
   if (['.obj', '.off', '.xyz', '.pts', '.csv', '.pcd'].includes(ext)) {
+    if (bytes.length > MAX_TEXT_MESH_CHARACTERS) throw new Error('Text scan exceeds the 16 MiB local parsing limit.');
     const parsed = parseMeshText(bytes.toString('utf8'), ext);
     return validateParsedGeometry(parsed, 5_000_000, maxTriangles, unitToMm);
   }
@@ -128,7 +130,7 @@ app.use('/user-meshes', express.static(userDir, { fallthrough: false, maxAge: 0 
 app.use(express.json({ limit: '2mb' }));
 app.get('/api/health', (_req, res) => res.json({
   ok: true,
-  app: 'OpenCusp CAD',
+  app: 'procad CAD',
   localOnly: true,
   acceptedInputFormats: ['stl', 'ply', 'obj', 'off', 'xyz', 'pts', 'csv', 'pcd-ascii'],
   camHandoffFormats: ['stl', 'obj'],
@@ -162,7 +164,7 @@ async function publicDemoFiles() {
   const filename = 'demo_box.stl';
   const bytes = await fs.readFile(path.join(sampleDir, filename));
   const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const base = { url: '/sample/' + filename, sha256, unit: 'mm', unitToMm: 1, unitProvenance: 'Original synthetic OpenCusp fixture; generic dimensions only', color: '#93a6a4', opacity: 0.72, transform: { rotation: [0, 0, 0, 'XYZ'], scale: [1, 1, 1] } };
+  const base = { url: '/sample/' + filename, sha256, unit: 'mm', unitToMm: 1, unitProvenance: 'Original synthetic procad fixture; generic dimensions only', color: '#93a6a4', opacity: 0.72, transform: { rotation: [0, 0, 0, 'XYZ'], scale: [1, 1, 1] } };
   return [
     { ...base, name: 'Synthetic arch block', role: 'upper', visible: true, color: '#d7dce0', opacity: 0.62, transform: { ...base.transform, position: [0, 0, -3] } },
     { ...base, name: 'Synthetic antagonist block', role: 'opposing', visible: true, color: '#8ba6b3', opacity: 0.36, transform: { ...base.transform, position: [0, 0, 15] } },
@@ -175,8 +177,8 @@ app.get('/api/demo', async (_req, res) => {
   try {
     const legacy = usesLegacySample;
     res.json({
-      id: legacy ? 'bluesky-practice-3' : 'opencusp-public-demo',
-      title: legacy ? 'Crown practice case · #3' : 'OpenCusp public demo · synthetic mesh',
+      id: legacy ? 'bluesky-practice-3' : 'procad-public-demo',
+      title: legacy ? 'Crown practice case · #3' : 'procad public demo · synthetic mesh',
       source: legacy ? 'BlueSkyPlan-linked Crown Design, Print, Polish practice files' : 'Original synthetic fixture; no patient data or dental scan rights involved',
       unit: 'mm',
       files: legacy ? legacyDemoFiles : await publicDemoFiles()
@@ -209,10 +211,12 @@ async function writeStateFile(file, value) {
   await fs.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
   await fs.rename(temp, file);
 }
-app.post('/api/upload', upload.single('mesh'), (req, res) => {
+app.post('/api/upload', upload.single('mesh'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No mesh file received.' });
-  const unitToMm = ({ mm: 1, cm: 10, in: 25.4 })[String(req.body.sourceUnit || 'mm')] || 1;
-  validateUploadedMesh(req.file, unitToMm).then((meshInfo) => fs.readFile(req.file.path).then((bytes) => ({ meshInfo, bytes }))).then(({ meshInfo, bytes }) => {
+  try {
+    const unitToMm = unitToMillimeters(req.body.sourceUnit);
+    const meshInfo = await validateUploadedMesh(req.file, unitToMm);
+    const bytes = await fs.readFile(req.file.path);
     res.json({
       name: req.file.originalname,
       role: req.body.role || 'scan',
@@ -223,10 +227,10 @@ app.post('/api/upload', upload.single('mesh'), (req, res) => {
       geometryType: meshInfo.geometryType,
       sha256: createHash('sha256').update(bytes).digest('hex')
     });
-  }).catch(async (error) => {
+  } catch (error) {
     await fs.rm(req.file.path, { force: true });
     res.status(400).json({ error: error.message || 'Mesh validation failed.' });
-  });
+  }
 });
 app.get('/api/design/:id', async (req, res) => {
   const safeId = String(req.params.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 64);
@@ -350,7 +354,7 @@ app.post('/api/design/:id/cam-handoff', async (req, res) => {
   const stamp = new Date().toISOString();
   const manifest = {
     schemaVersion: 1,
-    product: 'OpenCusp Dental CAD',
+    product: 'procad Dental CAD',
     caseId: safeId,
     createdAt: stamp,
     delivery: 'local-file-handoff-only',
@@ -424,7 +428,7 @@ if (hasBuild) {
   app.use(express.static(distDir));
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 } else {
-  app.get('/', (_req, res) => res.status(200).send('OpenCusp API is running. Start the Vite development app with npm run dev.'));
+  app.get('/', (_req, res) => res.status(200).send('procad API is running. Start the Vite development app with npm run dev.'));
 }
 
 app.use((error, _req, res, _next) => {
@@ -432,6 +436,6 @@ app.use((error, _req, res, _next) => {
   res.status(400).json({ error: error.message || 'Request failed.' });
 });
 
-app.listen(port, '127.0.0.1', () => {
-  console.log('OpenCusp local service listening on http://127.0.0.1:' + port);
+export const server = app.listen(port, '127.0.0.1', () => {
+  console.log('procad local service listening on http://127.0.0.1:' + port);
 });

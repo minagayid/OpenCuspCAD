@@ -1,6 +1,6 @@
 # CAM approval and handoff gate
 
-OpenCuspCAD produces a local handoff package; it does not connect to or transmit to a CAM machine. The machine operator remains responsible for importing the geometry, selecting a validated strategy, simulating the toolpath, and releasing the job.
+procad produces a local handoff package; it does not connect to or transmit to a CAM machine. The machine operator remains responsible for importing the geometry, selecting a validated strategy, simulating the toolpath, and releasing the job.
 
 ## Required sequence
 

@@ -1,6 +1,6 @@
 # Open-source dependency notices
 
-OpenCusp's application code is an original local prototype. The production bundle uses the following direct npm dependencies (versions resolved in `app/package-lock.json`):
+procad's application code is an original local prototype. The production bundle uses the following direct npm dependencies (versions resolved in `app/package-lock.json`):
 
 | Package | Resolved version | Package license | Use |
 |---|---:|---|---|
@@ -18,4 +18,4 @@ OpenCusp's application code is an original local prototype. The production bundl
 
 The corresponding license files are supplied by the installed packages under `app/node_modules/<package>/LICENSE` (Vite's file is `LICENSE.md`) and are restored by `npm ci`. This inventory is a direct-dependency notice, not a full transitive-license audit. Before redistributing an installer or bundling additional datasets/libraries, generate and review a complete dependency/license inventory for that release.
 
-The public repository includes only the original synthetic fixture in `data/demo/`. The local BlueSkyPlan-linked practice scans in `data/BlueSky_Crown_Practice/` are training inputs, **not** OpenCusp source code or an open-source dataset. Their further redistribution rights were not established, so the directory is excluded by `.gitignore` and is not part of the public repository.
+The public repository includes only the original synthetic fixture in `data/demo/`. The local BlueSkyPlan-linked practice scans in `data/BlueSky_Crown_Practice/` are training inputs, **not** procad source code or an open-source dataset. Their further redistribution rights were not established, so the directory is excluded by `.gitignore` and is not part of the public repository.

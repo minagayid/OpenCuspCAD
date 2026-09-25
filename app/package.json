@@ -1,5 +1,5 @@
 {
-  "name": "opencusp-dental-cad",
+  "name": "procad",
   "version": "0.1.0",
   "private": true,
   "description": "Local-first dental scan and restoration design workbench",
@@ -29,14 +29,15 @@
     "vite": "^7.3.1"
   },
   "build": {
-    "appId": "org.opencusp.dentalcad",
-    "productName": "OpenCusp CAD",
+    "appId": "org.procad.dentalcad",
+    "productName": "procad",
     "asar": false,
     "files": [
       "dist/**/*",
       "server.mjs",
       "src/mesh-formats.js",
       "src/mesh-validation.js",
+      "src/units.js",
       "server-loaders/**/*",
       "electron-main.mjs",
       "package.json",
@@ -52,7 +53,7 @@
       "target": [
         "portable"
       ],
-      "artifactName": "OpenCuspCAD-${version}-portable.exe"
+      "artifactName": "procad-${version}-portable.exe"
     },
     "portable": {
       "requestExecutionLevel": "user"

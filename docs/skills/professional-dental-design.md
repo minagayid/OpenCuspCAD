@@ -1,6 +1,6 @@
 # Professional dental design skill
 
-Use this workflow as a design brief and review aid. It is not a clinical protocol, a substitute for a qualified dental professional, or a claim that the current OpenCuspCAD prototype produces a clinically usable restoration.
+Use this workflow as a design brief and review aid. It is not a clinical protocol, a substitute for a qualified dental professional, or a claim that the current procad prototype produces a clinically usable restoration.
 
 ## 1. Establish the case identity
 
@@ -13,7 +13,7 @@ Inspect facial/buccal, lingual/palatal, mesial, distal, and occlusal views. Conf
 - **Crown:** cervical line, proximal contacts, height of contour, facial/lingual surfaces, marginal ridges, fossae, grooves, pits, and cusp inclines.
 - **Posterior tooth:** mesial/distal marginal ridges, buccal and lingual cusps, central groove/fossa, triangular ridges, and functional cusp relationships.
 - **Anterior tooth:** incisal edge, labial developmental lobes, lingual cingulum, marginal ridges, lingual fossa, and incisal embrasures.
-- **Root/abutment context:** preparation finish line, axial walls, path of insertion, line angles, undercuts, ferrule/residual tooth structure, and soft-tissue clearance. These must be assessed by a qualified reviewer; OpenCuspCAD does not infer them from a generic shell.
+- **Root/abutment context:** preparation finish line, axial walls, path of insertion, line angles, undercuts, ferrule/residual tooth structure, and soft-tissue clearance. These must be assessed by a qualified reviewer; procad does not infer them from a generic shell.
 
 ## 3. Separate observation from invention
 
@@ -35,7 +35,7 @@ Review the current design fingerprint against the case source. A qualified denta
 
 ## Anatomical reference images
 
-These linked images are study aids, not patient-specific design templates. They are hosted externally and are not bundled into OpenCuspCAD.
+These linked images are study aids, not patient-specific design templates. They are hosted externally and are not bundled into procad.
 
 ![Cross sections of human teeth](https://commons.wikimedia.org/wiki/Special:FilePath/Cross_sections_of_teeth_intl.svg)
 

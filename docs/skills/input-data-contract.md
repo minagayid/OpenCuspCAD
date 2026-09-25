@@ -1,6 +1,6 @@
-# OpenCuspCAD input data contract
+# procad input data contract
 
-This contract describes what OpenCuspCAD can read, what it can do with each type, and what remains the operator's responsibility.
+This contract describes what procad can read, what it can do with each type, and what remains the operator's responsibility.
 
 ## Accepted inputs
 
@@ -19,7 +19,7 @@ This contract describes what OpenCuspCAD can read, what it can do with each type
 
 ## Point-cloud boundary
 
-Point clouds can be inspected and retained for a future registration or reconstruction workflow. A validated surface reconstruction, hole/edge review, normal-orientation check, and unit verification are required before a point cloud can become a design surface. OpenCuspCAD currently blocks the abutment manufacturing path and does not convert point clouds automatically.
+Point clouds can be inspected and retained for a future registration or reconstruction workflow. A validated surface reconstruction, hole/edge review, normal-orientation check, and unit verification are required before a point cloud can become a design surface. procad currently blocks the abutment manufacturing path and does not convert point clouds automatically.
 
 ## Unsupported or conversion-required inputs
 
